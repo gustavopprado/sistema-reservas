@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, Mail, AlertCircle, Users, Type } from 'lucide-react';
-import axios from 'axios';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check } from 'lucide-react';
+import api from '../api'; 
+// IMPORTANTE: Importando a lista de usuários
+import usersList from '../users.json'; 
 
 export default function ReservationModal({ 
   room, onClose, onSuccess, initialDate, initialTime, currentUserEmail, editingBooking 
@@ -19,6 +21,11 @@ export default function ReservationModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // ESTADOS PARA O AUTOCOMPLETE
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionsRef = useRef(null);
+
   // EFEITO 1: Preencher formulário se for edição
   useEffect(() => {
     if (editingBooking) {
@@ -33,25 +40,33 @@ export default function ReservationModal({
     }
   }, [editingBooking]);
 
-  // EFEITO 2: Buscar horários ocupados ao mudar data ou sala
+  // EFEITO 2: Buscar horários ocupados
   useEffect(() => {
     if (formData.date && room.id) {
       fetchBusySlots();
     }
   }, [formData.date, room.id]);
 
+  // EFEITO 3: Fechar sugestões ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const fetchBusySlots = async () => {
     setLoadingSlots(true);
     try {
-      const response = await axios.get('http://localhost:3000/bookings/search', {
+      const response = await api.get('/bookings/search', {
         params: { roomId: room.id, date: formData.date }
       });
-      // Se estiver editando, remove a própria reserva da lista de "ocupados" visualmente
-      // para não parecer que está conflitando consigo mesma na lista lateral
       const slots = editingBooking 
         ? response.data.filter(b => b.id !== editingBooking.id)
         : response.data;
-
       setBusySlots(slots);
     } catch (err) {
       console.error("Erro ao buscar agenda:", err);
@@ -64,6 +79,45 @@ export default function ReservationModal({
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // LÓGICA ESPECIAL PARA O CAMPO DE CONVIDADOS
+  const handleAttendeesChange = (e) => {
+    const value = e.target.value;
+    setFormData({ ...formData, attendees: value });
+
+    // 1. Pega o último termo digitado (após a última vírgula)
+    const parts = value.split(',');
+    const currentSearchTerm = parts[parts.length - 1].trim().toLowerCase();
+
+    // 2. Se tiver mais de 1 letra, busca no JSON
+    if (currentSearchTerm.length > 1) {
+      const matches = usersList.filter(user => 
+        user.email.toLowerCase().includes(currentSearchTerm) || 
+        user.nome.toLowerCase().includes(currentSearchTerm)
+      ).slice(0, 5); // Limita a 5 sugestões
+
+      setSuggestions(matches);
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  // CLICAR NA SUGESTÃO
+  const selectSuggestion = (user) => {
+    const parts = formData.attendees.split(',');
+    parts.pop(); // Remove o termo incompleto que você estava digitando
+    parts.push(user.email); // Adiciona o e-mail completo
+    
+    // Remonta a string com vírgulas e espaço
+    const newValue = parts.join(', ').replace(/^, /, ''); // Remove vírgula inicial se houver
+    
+    setFormData({ ...formData, attendees: newValue + ', ' }); // Adiciona vírgula pro próximo
+    setShowSuggestions(false);
+    
+    // Foca de volta no textarea (opcional, mas bom pra UX)
+    document.getElementById('attendees-input').focus();
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -71,25 +125,23 @@ export default function ReservationModal({
 
     try {
       if (editingBooking) {
-        // MODO EDIÇÃO (PUT)
-        await axios.put(`http://localhost:3000/bookings/${editingBooking.id}`, {
+        await api.put(`/bookings/${editingBooking.id}`, {
           roomId: room.id, 
           ...formData
         });
         alert("Reserva atualizada com sucesso!");
       } else {
-        // MODO CRIAÇÃO (POST)
-        await axios.post('http://localhost:3000/bookings', {
+        await api.post('/bookings', {
           roomId: room.id,
           roomName: room.nome,
           ...formData
         });
       }
-
       onSuccess();
       onClose();
     } catch (err) {
       const msg = err.response?.data?.error || "Erro ao processar.";
+      console.log("ERRO REAL:", err);
       setError(msg);
     } finally {
       setLoading(false);
@@ -98,7 +150,7 @@ export default function ReservationModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[580px]"> {/* Altura ajustada */}
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[580px]"> 
         
         {/* LADO ESQUERDO: Formulário */}
         <div className="flex-1 p-6 overflow-y-auto">
@@ -121,7 +173,7 @@ export default function ReservationModal({
 
             {/* CAMPO TÍTULO */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Título da Reunião <span className="text-gray-400 font-normal text-xs">(Opcional)</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Título da Reunião</label>
               <div className="relative">
                 <Type className="absolute left-3 top-2.5 text-gray-400" size={18} />
                 <input 
@@ -169,7 +221,7 @@ export default function ReservationModal({
               </div>
             </div>
 
-            {/* EMAIL (Bloqueado) */}
+            {/* RESPONSÁVEL */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Responsável</label>
               <div className="relative">
@@ -178,14 +230,42 @@ export default function ReservationModal({
               </div>
             </div>
 
-            {/* CONVIDADOS */}
-            <div>
+            {/* CONVIDADOS COM AUTOCOMPLETE */}
+            <div className="relative" ref={suggestionsRef}>
               <label className="block text-sm font-medium text-gray-700 mb-1">Convidados</label>
               <div className="relative">
                 <Users className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <textarea name="attendees" value={formData.attendees} placeholder="joao@empresa.com, maria@empresa.com" rows="2" className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none text-sm" onChange={handleChange} />
+                <textarea 
+                  id="attendees-input"
+                  name="attendees" 
+                  value={formData.attendees} 
+                  placeholder="Comece a digitar o nome ou email..." 
+                  rows="2" 
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none text-sm" 
+                  onChange={handleAttendeesChange} 
+                />
               </div>
-              <p className="text-xs text-gray-500 mt-1">Eles receberão um aviso por e-mail.</p>
+              
+              {/* LISTA DE SUGESTÕES FLUTUANTE */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                  {suggestions.map((user, index) => (
+                    <div 
+                      key={index}
+                      onClick={() => selectSuggestion(user)}
+                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 flex justify-between items-center group"
+                    >
+                      <div>
+                        <div className="font-bold text-gray-700 text-sm">{user.nome}</div>
+                        <div className="text-xs text-gray-500">{user.email}</div>
+                      </div>
+                      <Check size={16} className="text-brand opacity-0 group-hover:opacity-100" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-xs text-gray-500 mt-1">Separe múltiplos e-mails por vírgula.</p>
             </div>
 
             {/* BOTÕES DE AÇÃO */}

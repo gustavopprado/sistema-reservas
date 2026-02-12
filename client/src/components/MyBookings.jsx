@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { Trash2, Calendar, Clock, Pencil } from 'lucide-react'; // Adicionei Pencil
+import api from '../api'; // Importando a API configurada
+import { Trash2, Calendar, Clock, Pencil } from 'lucide-react'; 
 
-// Recebe onEdit do pai (App.jsx)
 export default function MyBookings({ userEmail, onEdit }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12,7 +11,8 @@ export default function MyBookings({ userEmail, onEdit }) {
   }, [userEmail]);
 
   const fetchMyBookings = () => {
-    axios.get('http://localhost:3000/my-bookings', { params: { userEmail } })
+    // AQUI ESTAVA O ERRO: Troquei axios.get por api.get
+    api.get('/my-bookings', { params: { userEmail } })
       .then(res => {
         setBookings(res.data);
         setLoading(false);
@@ -26,14 +26,17 @@ export default function MyBookings({ userEmail, onEdit }) {
     }
 
     try {
-      await axios.delete(`http://localhost:3000/bookings/${bookingId}`, {
+      // AQUI TAMBÉM: Troquei axios.delete por api.delete
+      await api.delete(`/bookings/${bookingId}`, {
         data: { userEmail } 
       });
       
       alert("Reserva cancelada com sucesso.");
       fetchMyBookings(); 
     } catch (error) {
-      alert("Erro ao cancelar: " + (error.response?.data?.error || "Erro desconhecido"));
+      // Garante que não usamos 'error.response' se ele não existir
+      const msg = error.response?.data?.error || "Erro desconhecido ao cancelar";
+      alert("Erro ao cancelar: " + msg);
     }
   };
 
@@ -56,19 +59,16 @@ export default function MyBookings({ userEmail, onEdit }) {
               
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  {/* Se tiver título, mostra ele destaque. Senão, mostra o nome da sala */}
                   <span className="font-bold text-lg text-gray-800">
                     {booking.title || booking.roomName}
                   </span>
                   
-                  {/* Se tiver título, mostra o nome da sala como uma etiqueta ao lado */}
                   {booking.title && (
                     <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
                         {booking.roomName}
                     </span>
                   )}
 
-                  {/* Badge se for hoje */}
                   {booking.date === new Date().toISOString().split('T')[0] && (
                     <span className="bg-brand-light text-brand text-xs px-2 py-0.5 rounded-full font-bold">Hoje</span>
                   )}
@@ -92,7 +92,6 @@ export default function MyBookings({ userEmail, onEdit }) {
                 )}
               </div>
 
-              {/* BOTOES DE AÇÃO */}
               <div className="flex items-center gap-2 self-start md:self-center">
                 <button 
                   onClick={() => onEdit(booking)} 

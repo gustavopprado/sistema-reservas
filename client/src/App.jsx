@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
+import api from './api'
 import { auth } from './firebase-config' 
 import { onAuthStateChanged, signOut } from 'firebase/auth' 
-import RoomCard from './components/RoomCard'
+import RoomList from './components/RoomList' // Importação corrigida de RoomCard para RoomList
 import ReservationModal from './components/ReservationModal'
 import DailyView from './components/DailyView'
 import LoginScreen from './components/LoginScreen'
@@ -36,7 +36,7 @@ function App() {
   }, [])
 
   const fetchRooms = () => {
-    axios.get('http://localhost:3000/rooms')
+    api.get('/rooms')
       .then(response => {
         setRooms(response.data)
         setLoading(false)
@@ -60,14 +60,18 @@ function App() {
     setIsModalOpen(true)
   }
 
-  // NOVA FUNÇÃO: Chamada pelo MyBookings ao clicar no botão "Editar"
+  // NOVA FUNÇÃO: Chamada pelo MyBookings ou DailyView (Admin) ao clicar no botão "Editar"
   const handleEditBooking = (booking) => {
     setEditingBooking(booking)
-    // Precisamos montar um objeto 'room' mínimo para o modal saber ID e Nome
-    setSelectedRoom({ 
+    // Precisamos montar um objeto 'room' mínimo para o modal saber ID e Nome,
+    // pois a reserva tem 'roomId' mas o modal espera um objeto 'room'.
+    // Tentamos achar a sala na lista de salas carregadas.
+    const room = rooms.find(r => r.id === booking.roomId) || { 
         id: booking.roomId, 
         nome: booking.roomName 
-    })
+    }
+    
+    setSelectedRoom(room)
     setIsModalOpen(true)
   }
 
@@ -78,6 +82,8 @@ function App() {
   }
 
   const handleSuccess = () => {
+    // Recarrega as salas ou apenas fecha o modal. 
+    // Idealmente recarregaria os dados sem reload da página, mas o reload funciona.
     alert("Operação realizada com sucesso!")
     window.location.reload()
   }
@@ -94,6 +100,8 @@ function App() {
           {/* LOGO E TÍTULO */}
           <div className="flex items-center gap-3">
              <div className="flex items-center gap-2">
+                {/* Aqui você pode trocar pelo seu logo de imagem se quiser */}
+                {/* <img src="/logo.png" alt="Logo" className="w-10 h-10" /> */}
                 <Calendar className="text-brand" size={28} />
                 <h1 className="text-xl font-bold text-gray-800 hidden md:block border-l border-gray-300 pl-3 ml-1">
                   Reserva de Salas
@@ -102,28 +110,30 @@ function App() {
           </div>
           
           <div className="flex items-center gap-4">
-             {/* MENU DE NAVEGAÇÃO */}
+            {/* MENU DE NAVEGAÇÃO */}
             <div className="flex bg-gray-100 p-1 rounded-lg">
               <button 
                 onClick={() => setViewMode('cards')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'cards' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-                title="Lista de Salas"
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'cards' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                <LayoutGrid size={16} />
+                <LayoutGrid size={18} />
+                <span className="hidden md:inline">Salas</span>
               </button>
+              
               <button 
                 onClick={() => setViewMode('agenda')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'agenda' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-                title="Agenda Geral"
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'agenda' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                <CalendarDays size={16} />
+                <CalendarDays size={18} />
+                <span className="hidden md:inline">Agenda Geral</span>
               </button>
+              
               <button 
                 onClick={() => setViewMode('my_bookings')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'my_bookings' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-                title="Minhas Reservas"
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'my_bookings' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                <List size={16} />
+                <List size={18} />
+                <span className="hidden md:inline">Minhas Reservas</span>
               </button>
             </div>
 
@@ -152,25 +162,32 @@ function App() {
             <>
               {/* VISÃO DE CARDS */}
               {viewMode === 'cards' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in-up">
-                  {rooms.map(room => (
-                    <RoomCard key={room.id} room={room} onReserve={handleOpenModal} />
-                  ))}
-                </div>
+                // Passamos currentUserEmail para controlar o bloqueio da sala restrita
+                <RoomList 
+                    rooms={rooms} 
+                    onReserve={handleOpenModal} 
+                    currentUserEmail={user.email} 
+                />
               )}
 
               {/* VISÃO DE AGENDA GERAL */}
               {viewMode === 'agenda' && (
                 <div className="animate-fade-in-up">
-                  <DailyView rooms={rooms} onReserve={handleOpenModal} />
+                  {/* Passamos currentUserEmail e onEditBooking para permitir edição pelo Admin */}
+                  <DailyView 
+                    rooms={rooms} 
+                    onReserve={handleOpenModal} 
+                    onEditBooking={handleEditBooking} 
+                    currentUserEmail={user.email}
+                  />
                 </div>
               )}
 
               {/* VISÃO MINHAS RESERVAS */}
               {viewMode === 'my_bookings' && (
                  <MyBookings 
-                    userEmail={user.email} 
-                    onEdit={handleEditBooking} // <--- Passando a função de editar
+                   userEmail={user.email} 
+                   onEdit={handleEditBooking} 
                  />
               )}
             </>
@@ -181,7 +198,7 @@ function App() {
       {isModalOpen && selectedRoom && (
         <ReservationModal 
           room={selectedRoom} 
-          editingBooking={editingBooking} // <--- Passando a reserva em edição (ou null)
+          editingBooking={editingBooking} 
           initialDate={preSelectedDate}
           initialTime={preSelectedTime}
           currentUserEmail={user.email}

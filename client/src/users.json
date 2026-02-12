@@ -1,0 +1,518 @@
+[
+  {
+    "nome": "3D Warehouse",
+    "email": "3dwarehouse@fgvtn.com.br"
+  },
+  {
+    "nome": "Ademir Manutenção",
+    "email": "manutencao.mecanica@fgvtn.com.br"
+  },
+  {
+    "nome": "Admin",
+    "email": "admin@fgvtn.com.br"
+  },
+  {
+    "nome": "Adryan",
+    "email": "adryan@fgvtn.com.br"
+  },
+  {
+    "nome": "Almoxarifado",
+    "email": "almoxarifado@fgvtn.com.br"
+  },
+  {
+    "nome": "Alvaro",
+    "email": "alvaro@fgvtn.com.br"
+  },
+  {
+    "nome": "Ambrosio",
+    "email": "ambrosio@fgvtn.com.br"
+  },
+  {
+    "nome": "Andre Pereira",
+    "email": "pereira@fgvtn.com.br"
+  },
+  {
+    "nome": "Andressa Casarin",
+    "email": "andressa.casarin@fgvtn.com.br"
+  },
+  {
+    "nome": "Antonia",
+    "email": "antonia@fgvtn.com.br"
+  },
+  {
+    "nome": "Ariel",
+    "email": "ariel@fgvtn.com.br"
+  },
+  {
+    "nome": "Atendimento Cliente",
+    "email": "atendimento@fgvtn.com.br"
+  },
+  {
+    "nome": "Bruno",
+    "email": "bruno@fgvtn.com.br"
+  },
+  {
+    "nome": "Carla",
+    "email": "cpagar@fgvtn.com.br"
+  },
+  {
+    "nome": "Carlos",
+    "email": "carlos@fgvtn.com.br"
+  },
+  {
+    "nome": "CIPA",
+    "email": "cipa@fgvtn.com.br"
+  },
+  {
+    "nome": "Cipa Itajaí",
+    "email": "cipa.itajai@fgvtn.com.br"
+  },
+  {
+    "nome": "Ciria",
+    "email": "ciria@fgvtn.com.br"
+  },
+  {
+    "nome": "Coletor",
+    "email": "coletor@fgvtn.com.br"
+  },
+  {
+    "nome": "Daiana",
+    "email": "daiana@fgvtn.com.br"
+  },
+  {
+    "nome": "Daniel",
+    "email": "daniel@fgvtn.com.br"
+  },
+  {
+    "nome": "Demetrius",
+    "email": "demetrius@fgvtn.com.br"
+  },
+  {
+    "nome": "Denise",
+    "email": "denise@fgvtn.com.br"
+  },
+  {
+    "nome": "Desiree",
+    "email": "desiree@fgvtn.com.br"
+  },
+  {
+    "nome": "Diego",
+    "email": "diego@fgvtn.com.br"
+  },
+  {
+    "nome": "Diniz",
+    "email": "compras@fgvtn.com.br"
+  },
+  {
+    "nome": "Elisangela",
+    "email": "elisangela@fgvtn.com.br"
+  },
+  {
+    "nome": "Elisiane",
+    "email": "elisiane@fgvtn.com.br"
+  },
+  {
+    "nome": "Embalagem",
+    "email": "embalagem@fgvtn.com.br"
+  },
+  {
+    "nome": "Estamparia",
+    "email": "estamparia@fgvtn.com.br"
+  },
+  {
+    "nome": "Estamparia 082",
+    "email": "estamparia082@fgvtn.com.br"
+  },
+  {
+    "nome": "Evandro",
+    "email": "evandro@fgvtn.com.br"
+  },
+  {
+    "nome": "Expedição",
+    "email": "expedicao@fgvtn.com.br"
+  },
+  {
+    "nome": "Fabiano Gonçalves",
+    "email": "fabiano.goncalves@fgvtn.com.br"
+  },
+  {
+    "nome": "Fabio",
+    "email": "fabio@fgvtn.com.br"
+  },
+  {
+    "nome": "Faturista Itajai",
+    "email": "faturista.itajai@fgvtn.com.br"
+  },
+  {
+    "nome": "Ferramentaria",
+    "email": "ferramentaria@fgvtn.com.br"
+  },
+  {
+    "nome": "FGVTN",
+    "email": "fgvtn@fgvtn.com.br"
+  },
+  {
+    "nome": "FGVTN BI",
+    "email": "fgvtnbi@fgvtn.com.br"
+  },
+  {
+    "nome": "Gabriel Prcebeniak",
+    "email": "gabriel.prcebeniak@fgvtn.com.br"
+  },
+  {
+    "nome": "Gabriel Schmanski",
+    "email": "gabriel.schmanski@fgvtn.com.br"
+  },
+  {
+    "nome": "Geovana",
+    "email": "geovana@fgvtn.com.br"
+  },
+  {
+    "nome": "Gerson",
+    "email": "rh@fgvtn.com.br"
+  },
+  {
+    "nome": "Gerson Dias",
+    "email": "gerson.dias@fgvtn.com.br"
+  },
+  {
+    "nome": "Gilson -",
+    "email": "gilson@fgvtn.com.br"
+  },
+  {
+    "nome": "Giovani",
+    "email": "giovani@fgvtn.com.br"
+  },
+  {
+    "nome": "Gisele",
+    "email": "gisele@fgvtn.com.br"
+  },
+  {
+    "nome": "Giulliano",
+    "email": "giulliano@fgvtn.com.br"
+  },
+  {
+    "nome": "Glérie da Veiga",
+    "email": "glerie@fgvtn.com.br"
+  },
+  {
+    "nome": "Guilherme Cristo",
+    "email": "guilherme.c@fgvtn.com.br"
+  },
+  {
+    "nome": "Gustavo",
+    "email": "gustavo@fgvtn.com.br"
+  },
+  {
+    "nome": "Herbert",
+    "email": "herbert@fgvtn.com.br"
+  },
+  {
+    "nome": "Importa",
+    "email": "xml.importa@fgvtn.com.br"
+  },
+  {
+    "nome": "Injetoras",
+    "email": "injetoras@fgvtn.com.br"
+  },
+  {
+    "nome": "Ivan Sergio",
+    "email": "ivan@fgvtn.com.br"
+  },
+  {
+    "nome": "Jardel",
+    "email": "jardel@fgvtn.com.br"
+  },
+  {
+    "nome": "Josiane",
+    "email": "josiane@fgvtn.com.br"
+  },
+  {
+    "nome": "Josue CQ",
+    "email": "josuecq@fgvtn.com.br"
+  },
+  {
+    "nome": "Karinne",
+    "email": "karinne@fgvtn.com.br"
+  },
+  {
+    "nome": "Kauan -",
+    "email": "kauan@fgvtn.com.br"
+  },
+  {
+    "nome": "Leticia Caldeira",
+    "email": "leticia.caldeira@fgvtn.com.br"
+  },
+  {
+    "nome": "Leticia Chaikoski",
+    "email": "leticia.chaikoski@fgvtn.com.br"
+  },
+  {
+    "nome": "Leticia Gagno",
+    "email": "leticia.gagno@fgvtn.com.br"
+  },
+  {
+    "nome": "Lucas",
+    "email": "lucas@fgvtn.com.br"
+  },
+  {
+    "nome": "Luciane",
+    "email": "luciane@fgvtn.com.br"
+  },
+  {
+    "nome": "Luciano",
+    "email": "luciano@fgvtn.com.br"
+  },
+  {
+    "nome": "Luciano Pacheco",
+    "email": "luciano.pacheco@fgvtn.com.br"
+  },
+  {
+    "nome": "Luciel",
+    "email": "luciel@fgvtn.com.br"
+  },
+  {
+    "nome": "Lucilda",
+    "email": "lucilda@fgvtn.com.br"
+  },
+  {
+    "nome": "Lucineia",
+    "email": "lucineia@fgvtn.com.br"
+  },
+  {
+    "nome": "Lucineia Garcia -",
+    "email": "lucineia.garcia@fgvtn.com.br"
+  },
+  {
+    "nome": "Lurdes",
+    "email": "lurdes@fgvtn.com.br"
+  },
+  {
+    "nome": "Marcel",
+    "email": "marcel@fgvtn.com.br"
+  },
+  {
+    "nome": "Marcio CQ",
+    "email": "marciocq@fgvtn.com.br"
+  },
+  {
+    "nome": "Maria Mônica",
+    "email": "maria@fgvtn.com.br"
+  },
+  {
+    "nome": "Mauricio",
+    "email": "mauricio@fgvtn.com.br"
+  },
+  {
+    "nome": "Moises",
+    "email": "moises@fgvtn.com.br"
+  },
+  {
+    "nome": "Montagem",
+    "email": "montagem@fgvtn.com.br"
+  },
+  {
+    "nome": "Montagem kit",
+    "email": "montagemkit@fgvtn.com.br"
+  },
+  {
+    "nome": "Montagem TT 45",
+    "email": "tt45@fgvtn.com.br"
+  },
+  {
+    "nome": "Nota Fiscal Eletronica",
+    "email": "nfe@fgvtn.com.br"
+  },
+  {
+    "nome": "Nubia",
+    "email": "nubia@fgvtn.com.br"
+  },
+  {
+    "nome": "Nádia Marília Siqueira",
+    "email": "nadia@fgvtn.com.br"
+  },
+  {
+    "nome": "Paulo",
+    "email": "engenharia@fgvtn.com.br"
+  },
+  {
+    "nome": "Pedro Becker",
+    "email": "pedro.becker@fgvtn.com.br"
+  },
+  {
+    "nome": "Perfiladeiras",
+    "email": "perfiladeiras@fgvtn.com.br"
+  },
+  {
+    "nome": "Pesquisa MKT",
+    "email": "pesquisa@fgvtn.com.br"
+  },
+  {
+    "nome": "Pintura",
+    "email": "pintura@fgvtn.com.br"
+  },
+  {
+    "nome": "Poliany Borges",
+    "email": "poliany.borges@fgvtn.com.br"
+  },
+  {
+    "nome": "portaria",
+    "email": "portaria@fgvtn.com.br"
+  },
+  {
+    "nome": "Rafaelly Mellinger",
+    "email": "rafaelly@fgvtn.com.br"
+  },
+  {
+    "nome": "RECICLAMB",
+    "email": "reciclamb@fgvtn.com.br"
+  },
+  {
+    "nome": "Recrutamento",
+    "email": "recrutamento@fgvtn.com.br"
+  },
+  {
+    "nome": "Renata",
+    "email": "renata@fgvtn.com.br"
+  },
+  {
+    "nome": "Renata Mendes",
+    "email": "renata.mendes@fgvtn.com.br"
+  },
+  {
+    "nome": "Requisição Funcionário",
+    "email": "requisicao@fgvtn.com.br"
+  },
+  {
+    "nome": "Reservas",
+    "email": "reservas@fgvtn.com.br"
+  },
+  {
+    "nome": "Ricardo",
+    "email": "ricardo@fgvtn.com.br"
+  },
+  {
+    "nome": "Ricardo Bueno",
+    "email": "bueno@fgvtn.com.br"
+  },
+  {
+    "nome": "Roberto KB",
+    "email": "roberto.kb@fgvtn.com.br"
+  },
+  {
+    "nome": "Robson",
+    "email": "robson@fgvtn.com.br"
+  },
+  {
+    "nome": "Rogério Almeida",
+    "email": "sac@fgvtn.com.br"
+  },
+  {
+    "nome": "Ronaldo Budnik",
+    "email": "ronaldo.budnik@fgvtn.com.br"
+  },
+  {
+    "nome": "Rosangela Batista",
+    "email": "rosangela.batista@fgvtn.com.br"
+  },
+  {
+    "nome": "Rosinda",
+    "email": "rosinda@fgvtn.com.br"
+  },
+  {
+    "nome": "Sandra",
+    "email": "financeiro@fgvtn.com.br"
+  },
+  {
+    "nome": "Scheila",
+    "email": "scheila@fgvtn.com.br"
+  },
+  {
+    "nome": "Silmar da Rosa",
+    "email": "silmar.rosa@fgvtn.com.br"
+  },
+  {
+    "nome": "Simone",
+    "email": "simone@fgvtn.com.br"
+  },
+  {
+    "nome": "site",
+    "email": "site@fgvtn.com.br"
+  },
+  {
+    "nome": "Solda",
+    "email": "solda@fgvtn.com.br"
+  },
+  {
+    "nome": "Solicitações de Compras",
+    "email": "sc@fgvtn.com.br"
+  },
+  {
+    "nome": "Suporte Help Desk",
+    "email": "suporte@fgvtn.com.br"
+  },
+  {
+    "nome": "Susanne",
+    "email": "susanne@fgvtn.com.br"
+  },
+  {
+    "nome": "Tatiana",
+    "email": "tatiana@fgvtn.com.br"
+  },
+  {
+    "nome": "Teciane",
+    "email": "teciane@fgvtn.com.br"
+  },
+  {
+    "nome": "tenferragens",
+    "email": "tenferragens@fgvtn.com.br"
+  },
+  {
+    "nome": "TESTE TI",
+    "email": "testeti@fgvtn.com.br"
+  },
+  {
+    "nome": "Thawanny",
+    "email": "thawanny@fgvtn.com.br"
+  },
+  {
+    "nome": "Thiago Gonçalves",
+    "email": "thiago.ramos@fgvtn.com.br"
+  },
+  {
+    "nome": "Tissy Moraes",
+    "email": "tissy@fgvtn.com.br"
+  },
+  {
+    "nome": "Valmir",
+    "email": "manutencao@fgvtn.com.br"
+  },
+  {
+    "nome": "Valquiria",
+    "email": "valquiria@fgvtn.com.br"
+  },
+  {
+    "nome": "Vanessa Cruz",
+    "email": "vanessa.cruz@fgvtn.com.br"
+  },
+  {
+    "nome": "Vanussi",
+    "email": "vanussi@fgvtn.com.br"
+  },
+  {
+    "nome": "Victor Fontoura",
+    "email": "victor.fontoura@fgvtn.com.br"
+  },
+  {
+    "nome": "Victor Lopes",
+    "email": "victor@fgvtn.com.br"
+  },
+  {
+    "nome": "Vitor Hugo",
+    "email": "logistica@fgvtn.com.br"
+  },
+  {
+    "nome": "Work",
+    "email": "work@fgvtn.com.br"
+  }
+]
