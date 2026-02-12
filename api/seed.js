@@ -19,31 +19,6 @@ const minhasSalas = [
     localizacao: "Administrativo",
     equipamentos: ["TV", "Ar Condicionado", "Web Cam (Com microfone)", "Computador"],
   },
-  {
-    nome: "Sala de Reunião Industrial",
-    capacidade: 10,
-    localizacao: "Industrial",
-    equipamentos: ["TV", "Microfone de mesa", "Web Cam"],
-  },
-  {
-    nome: " Sala de Treinamento",
-    capacidade: 30,
-    localizacao: "Industrial",
-    equipamentos: ["Tela Interativa", "Microfone e Camera", "Sistema de Som", "Ar Condicionado"],
-  },
-  {
-    nome: "Sala de Reunião Engenharia",
-    capacidade: 10,
-    localizacao: "Fábrica",
-    equipamentos: ["TV", "Microfone de mesa", "Web Cam", "Ar Condicionado"],
-  },
-  {
-    nome: "Salão de Eventos",
-    capacidade: 80,
-    localizacao: "Estacionamento",
-    equipamentos: ["Painel de LED", "Ar Condicionado", "Cozinha completa", "Sistema de Som", "Banheiros", "Churrasqueira"],
-  },
-  // Adicione mais salas aqui se tiver...
 ];
 
 async function povoarBanco() {

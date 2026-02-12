@@ -1,37 +1,58 @@
 import React, { useState } from 'react';
-import { Users, MapPin, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Users, MapPin, ChevronLeft, ChevronRight, Lock, CalendarCheck } from 'lucide-react';
 
-export default function RoomCard({ room, onReserve }) {
+export default function RoomCard({ room, onReserve, currentUserEmail }) {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
-  const images = room.imagens || [];
+  
+  // Normaliza imagens (se vier null vira array vazio)
+  const images = room.imagens || []; 
+  // Fallback: Se não tiver lista de imagens, tenta usar a propriedade única 'foto' ou 'image'
+  if (images.length === 0 && (room.foto || room.image)) {
+      images.push(room.foto || room.image);
+  }
 
   // --- REGRAS DE EXCEÇÃO POR ID ---
-  const ID_SIMONE = 'dC9EnaetaDz8KOcLInqc';
-  const ID_SALAO  = 'JB9jT4p0Epo4Y3mJvU4N';
+  const ID_SIMONE = 'BXkxGTCaPe37qS9ZuVvp';
+  const ADMIN_EMAIL = 'simone@fgvtn.com.br';
+  // const ID_SALAO  = 'JB9jT4p0Epo4Y3mJvU4N'; // Se quiser manter lógica do salão
 
-  const isRestricted = room.id === ID_SIMONE;
-  const isSalao = room.id === ID_SALAO;
+  console.log('--- DEBUG ROOM CARD ---');
+  console.log('Sala:', room.nome);
+  console.log('Usuario Logado:', currentUserEmail);
+  console.log('É a Simone?', currentUserEmail === ADMIN_EMAIL);
+
+  // Verifica se é a Simone
+  const isAdmin = currentUserEmail === ADMIN_EMAIL;
+
+  // A sala é restrita se for a Sala da Simone
+  const isRestrictedRoom = room.id === ID_SIMONE;
+  
+  // O bloqueio acontece se: É sala restrita E o usuário NÃO é a Simone
+  const isLocked = isRestrictedRoom && !isAdmin;
 
   const nextImage = (e) => {
     e.stopPropagation();
-    setCurrentImgIndex((prev) => (prev + 1) % images.length);
+    if (images.length > 1) setCurrentImgIndex((prev) => (prev + 1) % images.length);
   };
 
   const prevImage = (e) => {
     e.stopPropagation();
-    setCurrentImgIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+    if (images.length > 1) setCurrentImgIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
   };
 
   // Função auxiliar para decidir o texto do botão
   const getButtonText = () => {
-    if (isRestricted) return "Reservas apenas com a Simone";
-    if (isSalao) return "Reservar Salão";
+    if (isRestrictedRoom) {
+        if (isAdmin) return "Reservar (Modo Admin)";
+        return "Reservas apenas com a Simone";
+    }
+    // if (isSalao) return "Reservar Salão";
     return "Reservar Sala";
   };
 
   return (
     <div className={`bg-white rounded-xl shadow-md overflow-hidden border flex flex-col h-full group transition-all
-      ${isRestricted ? 'border-red-100 bg-red-50/30' : 'border-gray-100 hover:shadow-lg'} 
+      ${isLocked ? 'border-red-100 bg-red-50/30' : 'border-gray-100 hover:shadow-lg'} 
     `}>
       
       {/* --- ÁREA DA IMAGEM --- */}
@@ -42,20 +63,21 @@ export default function RoomCard({ room, onReserve }) {
               src={images[currentImgIndex]} 
               alt={room.nome} 
               className={`w-full h-full object-cover transition-transform duration-500 
-                ${!isRestricted && 'hover:scale-105'} 
-                ${isRestricted && 'grayscale-[50%]'} 
+                ${!isLocked && 'hover:scale-105'} 
+                ${isLocked && 'grayscale-[50%] opacity-80'} 
               `}
+              onError={(e) => { e.target.src = 'https://placehold.co/600x400?text=Sem+Imagem'; }}
             />
             {images.length > 1 && (
               <>
-                <button onClick={prevImage} className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={prevImage} className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <ChevronLeft size={20} />
                 </button>
-                <button onClick={nextImage} className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={nextImage} className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <ChevronRight size={20} />
                 </button>
                 {/* Indicador de pontos */}
-                <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+                <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-10">
                   {images.map((_, idx) => (
                     <div key={idx} className={`h-1.5 rounded-full transition-all ${idx === currentImgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'}`} />
                   ))}
@@ -64,16 +86,17 @@ export default function RoomCard({ room, onReserve }) {
             )}
           </>
         ) : (
-          <div className={`w-full h-full flex items-center justify-center ${isRestricted ? 'bg-gray-400' : 'bg-brand'}`}>
+          <div className={`w-full h-full flex items-center justify-center ${isLocked ? 'bg-gray-300' : 'bg-brand'}`}>
             <span className="text-white text-5xl font-bold opacity-30">
               {room.nome ? room.nome.charAt(0) : 'S'}
             </span>
           </div>
         )}
 
-        {isRestricted && (
-          <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm">
-            <Lock size={12} /> Especial
+        {/* Badge Visual de Bloqueio */}
+        {isLocked && (
+          <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm z-20">
+            <Lock size={12} /> Restrito
           </div>
         )}
       </div>
@@ -86,7 +109,7 @@ export default function RoomCard({ room, onReserve }) {
         
         <div className="space-y-2 mb-4 flex-grow">
           <div className="flex items-center text-gray-600 text-sm">
-            <Users size={18} className={`mr-2 ${isRestricted ? 'text-gray-400' : 'text-brand'}`} />
+            <Users size={18} className={`mr-2 ${isLocked ? 'text-gray-400' : 'text-brand'}`} />
             <span>Capacidade: <strong>{room.capacidade} pessoas</strong></span>
           </div>
           
@@ -110,16 +133,17 @@ export default function RoomCard({ room, onReserve }) {
 
         {/* --- BOTÃO PERSONALIZADO --- */}
         <button 
-          onClick={() => !isRestricted && onReserve(room)}
-          disabled={isRestricted}
-          className={`w-full mt-auto py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center justify-center gap-2
-            ${isRestricted 
+          // Só libera o clique se NÃO estiver bloqueado
+          onClick={() => !isLocked && onReserve(room)}
+          disabled={isLocked}
+          className={`w-full mt-auto py-2.5 rounded-lg font-bold transition-all shadow-sm flex items-center justify-center gap-2
+            ${isLocked 
               ? 'bg-gray-200 text-gray-500 cursor-not-allowed border border-gray-300' 
-              : 'bg-brand text-white hover:bg-brand-hover'
+              : 'bg-brand text-white hover:bg-brand-hover shadow-brand hover:shadow-md active:scale-95'
             }
           `}
         >
-          {isRestricted && <Lock size={16} />}
+          {isLocked ? <Lock size={16} /> : <CalendarCheck size={18} />}
           {getButtonText()}
         </button>
       </div>

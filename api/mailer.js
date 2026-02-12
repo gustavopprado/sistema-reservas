@@ -13,55 +13,51 @@ async function createTransporter() {
   return { transporter };
 }
 
-async function sendInviteEmail(bookingData, attendeesList) {
-  if (!attendeesList || attendeesList.length === 0) return;
+// ... dentro de api/mailer.js
 
+async function sendInviteEmail(bookingData, attendeesList) {
   const { transporter } = await createTransporter();
 
-  // 1. Criar o Objeto de Calendário (O Arquivo .ics)
-  const calendar = ical({ name: 'Reserva de Sala' });
-  
-  // Horários precisam ser objetos Date
-  const start = new Date(`${bookingData.date}T${bookingData.startTime}:00`);
-  const end = new Date(`${bookingData.date}T${bookingData.endTime}:00`);
+  // GARANTE QUE O TÍTULO APAREÇA, OU USA O PADRÃO
+  const displayTitle = bookingData.title || 'Reunião'; 
 
+  const calendar = ical({ name: 'Convite de Reunião' });
   calendar.createEvent({
-    start: start,
-    end: end,
-    summary: `Reserva: ${bookingData.roomName}`,
-    description: `Reserva realizada pelo sistema.\nOrganizador: ${bookingData.userEmail}`,
+    start: new Date(`${bookingData.date}T${bookingData.startTime}:00`),
+    end: new Date(`${bookingData.date}T${bookingData.endTime}:00`),
+    summary: displayTitle, // <--- AQUI
+    description: `Reserva de sala confirmada.\nOrganizador: ${bookingData.userEmail}`,
     location: bookingData.roomName,
-    url: 'http://localhost:5173', // Link do seu sistema
-    organizer: {
-      name: 'Sistema de Reservas',
-      email: bookingData.userEmail // Aparece que foi o usuário quem convidou
-    },
+    organizer: { name: 'Sistema Reservas', email: bookingData.userEmail }
   });
 
   try {
-    // 2. Enviar o E-mail com o "icalEvent"
     await transporter.sendMail({
-      from: '"Sistema de Reservas" <SEU_EMAIL_AQUI@gmail.com>',
-      to: attendeesList, 
-      subject: `Convite: ${bookingData.roomName} - ${bookingData.date.split('-').reverse().join('/')}`,
-      
-      // Corpo simples para quem não tem calendário compatível
-      text: `Você foi convidado para uma reunião em ${bookingData.roomName} no dia ${bookingData.date}. Verifique o anexo.`,
-      
-      // O PULO DO GATO: Anexar o evento como convite oficial
+      from: '"Sistema de Reservas" <SEU_EMAIL_NOVO@gmail.com>',
+      to: attendeesList,
+      // TÍTULO NO ASSUNTO
+      subject: `CONVITE: ${displayTitle} - ${bookingData.date.split('-').reverse().join('/')} às ${bookingData.startTime}`,
+      // TÍTULO NO CORPO DO EMAIL
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #333;">
+          <h2 style="color: #2563eb;">Você foi convidado: ${displayTitle}</h2>
+          <p><strong>Sala:</strong> ${bookingData.roomName}</p>
+          <p><strong>Data:</strong> ${bookingData.date.split('-').reverse().join('/')}</p>
+          <p><strong>Horário:</strong> ${bookingData.startTime} - ${bookingData.endTime}</p>
+          <p><strong>Organizador:</strong> ${bookingData.userEmail}</p>
+          <hr/>
+          <p style="font-size: 12px; color: #666;">Verifique o anexo para adicionar à sua agenda.</p>
+        </div>
+      `,
       icalEvent: {
-        filename: 'invitation.ics',
-        method: 'request', // 'request' diz ao Gmail que é um CONVITE para ser respondido
+        filename: 'invite.ics',
+        method: 'request',
         content: calendar.toString()
       }
     });
-    
-    console.log("📨 Convite iCal enviado com sucesso!");
-    return true;
-
+    console.log("📨 E-mail de convite enviado.");
   } catch (error) {
-    console.error("❌ Erro ao enviar convite iCal:", error);
-    return false;
+    console.error("❌ Erro ao enviar convite:", error);
   }
 }
 
