@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check } from 'lucide-react';
 import api from '../api'; 
-// IMPORTANTE: Importando a lista de usuários
 import usersList from '../users.json'; 
+// 1. IMPORTAR O TOAST
+import toast from 'react-hot-toast';
 
 export default function ReservationModal({ 
   room, onClose, onSuccess, initialDate, initialTime, currentUserEmail, editingBooking 
@@ -19,14 +20,12 @@ export default function ReservationModal({
   const [busySlots, setBusySlots] = useState([]); 
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Removemos o estado 'error' local pois o toast vai cuidar disso
 
-  // ESTADOS PARA O AUTOCOMPLETE
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef(null);
 
-  // EFEITO 1: Preencher formulário se for edição
   useEffect(() => {
     if (editingBooking) {
       setFormData({
@@ -40,14 +39,10 @@ export default function ReservationModal({
     }
   }, [editingBooking]);
 
-  // EFEITO 2: Buscar horários ocupados
   useEffect(() => {
-    if (formData.date && room.id) {
-      fetchBusySlots();
-    }
+    if (formData.date && room.id) fetchBusySlots();
   }, [formData.date, room.id]);
 
-  // EFEITO 3: Fechar sugestões ao clicar fora
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(event.target)) {
@@ -79,21 +74,18 @@ export default function ReservationModal({
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // LÓGICA ESPECIAL PARA O CAMPO DE CONVIDADOS
   const handleAttendeesChange = (e) => {
     const value = e.target.value;
     setFormData({ ...formData, attendees: value });
 
-    // 1. Pega o último termo digitado (após a última vírgula)
     const parts = value.split(',');
     const currentSearchTerm = parts[parts.length - 1].trim().toLowerCase();
 
-    // 2. Se tiver mais de 1 letra, busca no JSON
     if (currentSearchTerm.length > 1) {
       const matches = usersList.filter(user => 
         user.email.toLowerCase().includes(currentSearchTerm) || 
         user.nome.toLowerCase().includes(currentSearchTerm)
-      ).slice(0, 5); // Limita a 5 sugestões
+      ).slice(0, 5); 
 
       setSuggestions(matches);
       setShowSuggestions(true);
@@ -102,86 +94,75 @@ export default function ReservationModal({
     }
   };
 
-  // CLICAR NA SUGESTÃO
   const selectSuggestion = (user) => {
     const parts = formData.attendees.split(',');
-    parts.pop(); // Remove o termo incompleto que você estava digitando
-    parts.push(user.email); // Adiciona o e-mail completo
-    
-    // Remonta a string com vírgulas e espaço
-    const newValue = parts.join(', ').replace(/^, /, ''); // Remove vírgula inicial se houver
-    
-    setFormData({ ...formData, attendees: newValue + ', ' }); // Adiciona vírgula pro próximo
+    parts.pop(); 
+    parts.push(user.email); 
+    const newValue = parts.join(', ').replace(/^, /, ''); 
+    setFormData({ ...formData, attendees: newValue + ', ' }); 
     setShowSuggestions(false);
-    
-    // Foca de volta no textarea (opcional, mas bom pra UX)
     document.getElementById('attendees-input').focus();
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
 
-    try {
-      if (editingBooking) {
-        await api.put(`/bookings/${editingBooking.id}`, {
-          roomId: room.id, 
-          ...formData
-        });
-        alert("Reserva atualizada com sucesso!");
-      } else {
-        await api.post('/bookings', {
-          roomId: room.id,
-          roomName: room.nome,
-          ...formData
-        });
-      }
-      onSuccess();
-      onClose();
-    } catch (err) {
-      const msg = err.response?.data?.error || "Erro ao processar.";
-      console.log("ERRO REAL:", err);
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+    // 2. LOGICA NOVA COM TOAST PROMISE
+    // O toast.promise "abraça" a requisição
+    const promise = editingBooking 
+      ? api.put(`/bookings/${editingBooking.id}`, { roomId: room.id, ...formData })
+      : api.post('/bookings', { roomId: room.id, roomName: room.nome, ...formData });
+
+    toast.promise(
+       promise,
+       {
+         loading: 'Processando reserva...',
+         success: () => {
+             onSuccess();
+             onClose();
+             return editingBooking ? 'Reserva atualizada!' : 'Reserva criada com sucesso!';
+         },
+         error: (err) => {
+             // Pega a mensagem de erro do servidor
+             return err.response?.data?.error || "Ocorreu um erro ao salvar.";
+         },
+       }
+    ).finally(() => {
+        setLoading(false);
+    });
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[580px]"> 
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[600px] border border-gray-100"> 
         
         {/* LADO ESQUERDO: Formulário */}
-        <div className="flex-1 p-6 overflow-y-auto">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-xl text-gray-800">
-              {editingBooking ? 'Editar Reserva' : 'Nova Reserva'}
-            </h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <X size={24} />
+        <div className="flex-1 p-8 overflow-y-auto">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+                <h3 className="font-bold text-2xl text-gray-800">
+                {editingBooking ? 'Editar Reserva' : 'Nova Reserva'}
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">Preencha os dados abaixo</p>
+            </div>
+            <button onClick={onClose} className="bg-gray-100 p-2 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+              <X size={20} />
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3">
-            {error && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-200 flex items-center gap-2">
-                <AlertCircle size={16} />
-                {error}
-              </div>
-            )}
-
-            {/* CAMPO TÍTULO */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* TÍTULO */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Título da Reunião</label>
-              <div className="relative">
-                <Type className="absolute left-3 top-2.5 text-gray-400" size={18} />
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Título da Reunião</label>
+              <div className="relative group">
+                <Type className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
                 <input 
                   type="text" 
                   name="title"
                   value={formData.title}
                   placeholder="Ex: Reunião de Planejamento"
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all"
                   onChange={handleChange}
                 />
               </div>
@@ -189,15 +170,15 @@ export default function ReservationModal({
 
             {/* DATA */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-2.5 text-brand" size={18} />
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Data</label>
+              <div className="relative group">
+                <Calendar className="absolute left-3 top-3 text-brand" size={18} />
                 <input 
                   type="date" 
                   name="date"
                   value={formData.date}
                   required
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all"
                   onChange={handleChange}
                 />
               </div>
@@ -206,47 +187,46 @@ export default function ReservationModal({
             {/* HORÁRIOS */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Início</label>
-                <div className="relative">
-                  <Clock className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                  <input type="time" name="startTime" value={formData.startTime} required className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none" onChange={handleChange} />
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Início</label>
+                <div className="relative group">
+                  <Clock className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
+                  <input type="time" name="startTime" value={formData.startTime} required className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all" onChange={handleChange} />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fim</label>
-                <div className="relative">
-                  <Clock className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                  <input type="time" name="endTime" value={formData.endTime} required className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none" onChange={handleChange} />
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Fim</label>
+                <div className="relative group">
+                  <Clock className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
+                  <input type="time" name="endTime" value={formData.endTime} required className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all" onChange={handleChange} />
                 </div>
               </div>
             </div>
 
             {/* RESPONSÁVEL */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Responsável</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Responsável</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-3 py-2 border border-gray-300 bg-gray-100 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
+                <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
+                <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-4 py-2.5 border border-gray-300 bg-gray-50 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
               </div>
             </div>
 
-            {/* CONVIDADOS COM AUTOCOMPLETE */}
+            {/* CONVIDADOS */}
             <div className="relative" ref={suggestionsRef}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Convidados</label>
-              <div className="relative">
-                <Users className="absolute left-3 top-2.5 text-gray-400" size={18} />
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Convidados</label>
+              <div className="relative group">
+                <Users className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
                 <textarea 
                   id="attendees-input"
                   name="attendees" 
                   value={formData.attendees} 
                   placeholder="Comece a digitar o nome ou email..." 
                   rows="2" 
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none text-sm" 
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all" 
                   onChange={handleAttendeesChange} 
                 />
               </div>
               
-              {/* LISTA DE SUGESTÕES FLUTUANTE */}
               {showSuggestions && suggestions.length > 0 && (
                 <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                   {suggestions.map((user, index) => (
@@ -264,17 +244,15 @@ export default function ReservationModal({
                   ))}
                 </div>
               )}
-
-              <p className="text-xs text-gray-500 mt-1">Separe múltiplos e-mails por vírgula.</p>
             </div>
 
             {/* BOTÕES DE AÇÃO */}
-            <div className="pt-2 flex gap-3">
+            <div className="pt-4 flex gap-3">
               <button 
                 type="submit" 
                 disabled={loading}
-                className={`flex-1 py-2.5 rounded-lg font-bold text-white transition-all shadow-md
-                  ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover'}
+                className={`flex-1 py-3 rounded-xl font-bold text-white transition-all shadow-md transform active:scale-95
+                  ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover shadow-brand'}
                 `}
               >
                 {loading ? 'Salvando...' : (editingBooking ? 'Salvar Alterações' : 'Confirmar Reserva')}
@@ -283,7 +261,7 @@ export default function ReservationModal({
               <button 
                 type="button"
                 onClick={onClose}
-                className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 font-medium transition-colors"
+                className="px-6 py-3 border border-gray-300 rounded-xl text-gray-600 hover:bg-gray-50 font-medium transition-colors"
               >
                 Cancelar
               </button>
@@ -298,27 +276,31 @@ export default function ReservationModal({
             <p className="text-sm text-gray-500">Agenda para {formData.date ? formData.date.split('-').reverse().join('/') : '...'}</p>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
             {loadingSlots ? (
               <div className="text-center py-10">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand mx-auto mb-2"></div>
-                <p className="text-gray-400 text-sm">Carregando...</p>
+                <p className="text-gray-400 text-sm">Verificando agenda...</p>
               </div>
             ) : busySlots.length === 0 ? (
               <div className="text-center py-10 opacity-60">
-                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3 text-green-600">
-                  <Clock size={24} />
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3 text-green-600">
+                  <Clock size={32} />
                 </div>
-                <p className="text-sm text-gray-600">Dia livre!</p>
+                <p className="text-sm text-gray-600 font-medium">Dia livre!</p>
+                <p className="text-xs text-gray-400">Nenhuma reserva para hoje.</p>
               </div>
             ) : (
               busySlots.map((slot) => (
-                <div key={slot.id} className="bg-red-50 border-l-4 border-red-500 p-2.5 rounded text-sm shadow-sm">
-                  <div className="flex justify-between items-center font-bold text-red-700 text-xs mb-1">
-                    <span>{slot.startTime} - {slot.endTime}</span>
+                <div key={slot.id} className="bg-white border-l-4 border-red-400 p-3 rounded-r-lg shadow-sm border border-gray-100">
+                  <div className="flex justify-between items-center font-bold text-gray-800 text-xs mb-1">
+                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded">{slot.startTime} - {slot.endTime}</span>
                   </div>
-                  <div className="text-xs text-red-600 font-medium truncate">
-                    {slot.title || slot.userEmail}
+                  <div className="text-xs text-gray-600 font-medium truncate mb-0.5">
+                    {slot.title || 'Sem título'}
+                  </div>
+                  <div className="text-[10px] text-gray-400 truncate">
+                    {slot.userEmail}
                   </div>
                 </div>
               ))
