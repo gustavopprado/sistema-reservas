@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Clock, ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
+import { Clock, ChevronLeft, ChevronRight, Edit3, Calendar } from 'lucide-react';
 
 export default function DailyView({ rooms, onReserve, onEditBooking, currentUserEmail }) {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -33,12 +33,18 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
     }
   };
 
+  // CORREÇÃO CRUCIAL AQUI: Nova lógica para verificar horários "quebrados"
   const getBookingForSlot = (roomId, time) => {
-    return bookings.find(b => 
-      b.roomId === roomId && 
-      time >= b.startTime && 
-      time < b.endTime
-    );
+    // Ex: time = "08:00", slotEnd = "09:00"
+    const slotStart = time;
+    const hour = parseInt(time.split(':')[0], 10);
+    const slotEnd = `${(hour + 1).toString().padStart(2, '0')}:00`;
+
+    return bookings.find(b => {
+      if (b.roomId !== roomId) return false;
+      // Verifica se a reserva cruza com esse bloco de 1 hora
+      return b.startTime < slotEnd && b.endTime > slotStart;
+    });
   };
 
   const handleDateChange = (days) => {
@@ -51,15 +57,23 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[calc(100vh-140px)]">
       {/* Cabeçalho */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
-        <button onClick={() => handleDateChange(-1)} className="p-2 hover:bg-gray-200 rounded-full">
+        <button onClick={() => handleDateChange(-1)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
            <ChevronLeft size={20} />
         </button>
-        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+        
+        {/* SELETOR DE DATA */}
+        <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-lg border border-transparent hover:border-gray-300 transition-all">
            <Clock size={20} className="text-brand" />
-           {selectedDate.split('-').reverse().join('/')}
+           <input 
+             type="date" 
+             value={selectedDate}
+             onChange={(e) => setSelectedDate(e.target.value)}
+             className="font-bold text-gray-800 text-lg bg-transparent border-none focus:ring-0 cursor-pointer outline-none"
+           />
            {isAdmin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded ml-2">Modo Admin</span>}
-        </h2>
-        <button onClick={() => handleDateChange(1)} className="p-2 hover:bg-gray-200 rounded-full">
+        </div>
+
+        <button onClick={() => handleDateChange(1)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
            <ChevronRight size={20} />
         </button>
       </div>
@@ -106,10 +120,9 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
                            <div className="text-red-500 truncate">{booking.userEmail}</div>
                         </div>
                       ) : (
-                        // CÉLULA LIVRE (AGORA INATIVA)
+                        // CÉLULA LIVRE (INATIVA)
                         <div 
                           className="w-full h-full bg-gray-50/30"
-                          // Removi o onClick e o cursor-pointer daqui
                         />
                       )}
                     </div>

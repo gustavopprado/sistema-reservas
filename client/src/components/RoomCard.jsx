@@ -4,30 +4,24 @@ import { Users, MapPin, ChevronLeft, ChevronRight, Lock, CalendarCheck } from 'l
 export default function RoomCard({ room, onReserve, currentUserEmail }) {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
   
-  // Normaliza imagens (se vier null vira array vazio)
   const images = room.imagens || []; 
-  // Fallback: Se não tiver lista de imagens, tenta usar a propriedade única 'foto' ou 'image'
   if (images.length === 0 && (room.foto || room.image)) {
       images.push(room.foto || room.image);
   }
 
-  // --- REGRAS DE EXCEÇÃO POR ID ---
+  // --- IDs DE CONFIGURAÇÃO ---
   const ID_SIMONE = 'BXkxGTCaPe37qS9ZuVvp';
   const ADMIN_EMAIL = 'simone@fgvtn.com.br';
-  // const ID_SALAO  = 'JB9jT4p0Epo4Y3mJvU4N'; // Se quiser manter lógica do salão
-
-  console.log('--- DEBUG ROOM CARD ---');
-  console.log('Sala:', room.nome);
-  console.log('Usuario Logado:', currentUserEmail);
-  console.log('É a Simone?', currentUserEmail === ADMIN_EMAIL);
-
-  // Verifica se é a Simone
-  const isAdmin = currentUserEmail === ADMIN_EMAIL;
-
-  // A sala é restrita se for a Sala da Simone
-  const isRestrictedRoom = room.id === ID_SIMONE;
   
-  // O bloqueio acontece se: É sala restrita E o usuário NÃO é a Simone
+  // ATUALIZADO: Novo ID do Salão
+  const ID_SALAO  = 'j7QOhdPRzEJcza2cMqwM'; 
+
+  // Verifica usuário e sala
+  const isAdmin = currentUserEmail === ADMIN_EMAIL;
+  const isRestrictedRoom = room.id === ID_SIMONE;
+  const isSalao = room.id === ID_SALAO; // Verifica se é o salão
+  
+  // Bloqueio
   const isLocked = isRestrictedRoom && !isAdmin;
 
   const nextImage = (e) => {
@@ -40,13 +34,13 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
     if (images.length > 1) setCurrentImgIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
   };
 
-  // Função auxiliar para decidir o texto do botão
+  // Lógica do Texto do Botão
   const getButtonText = () => {
     if (isRestrictedRoom) {
         if (isAdmin) return "Reservar (Modo Admin)";
         return "Reservas apenas com a Simone";
     }
-    // if (isSalao) return "Reservar Salão";
+    if (isSalao) return "Reservar Salão"; // Texto específico para o Salão
     return "Reservar Sala";
   };
 
@@ -76,7 +70,6 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
                 <button onClick={nextImage} className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full hover:bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <ChevronRight size={20} />
                 </button>
-                {/* Indicador de pontos */}
                 <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-10">
                   {images.map((_, idx) => (
                     <div key={idx} className={`h-1.5 rounded-full transition-all ${idx === currentImgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'}`} />
@@ -93,7 +86,6 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
           </div>
         )}
 
-        {/* Badge Visual de Bloqueio */}
         {isLocked && (
           <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm z-20">
             <Lock size={12} /> Restrito
@@ -133,7 +125,6 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
 
         {/* --- BOTÃO PERSONALIZADO --- */}
         <button 
-          // Só libera o clique se NÃO estiver bloqueado
           onClick={() => !isLocked && onReserve(room)}
           disabled={isLocked}
           className={`w-full mt-auto py-2.5 rounded-lg font-bold transition-all shadow-sm flex items-center justify-center gap-2

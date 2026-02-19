@@ -18,7 +18,7 @@ export default function LoginScreen() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
         <div className="flex justify-center mb-6">
-           <img src="/logo.png" alt="Logo Empresa" className="h-24 w-auto object-contain" />
+           <img src="/logo.png" alt="Logo Empresa" className="h-42 w-auto object-contain" />
         </div>
         
         <h1 className="text-2xl font-bold text-gray-800 mb-2">Reserva de Salas</h1>
