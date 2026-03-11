@@ -4,6 +4,7 @@ import { Plus, Edit, CarFront, Settings, Check, CheckCircle, X, History, Calenda
 import toast from 'react-hot-toast';
 
 export default function AdminCarPanel({ currentUserEmail }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const normalizeCategory = (value) => {
     const normalized = String(value || '')
       .normalize('NFD')
@@ -69,7 +70,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
     setLoadingCars(true);
     api.get('/cars')
       .then(res => {
-        setCars(res.data);
+        setCars(ensureArray(res.data));
         setLoadingCars(false);
       })
       .catch(err => {
@@ -82,7 +83,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
     setLoadingBookings(true);
     api.get('/car_bookings/active')
       .then(res => {
-        setActiveBookings(res.data);
+        setActiveBookings(ensureArray(res.data));
         setLoadingBookings(false);
       })
       .catch(err => {
@@ -96,7 +97,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
     setLoadingCosts(true);
     api.get('/car_costs')
       .then(res => {
-        setCosts(res.data);
+        setCosts(ensureArray(res.data));
         setLoadingCosts(false);
       })
       .catch(err => {
@@ -158,7 +159,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
     
     try {
       const res = await api.get(`/cars/${car.id}/history`);
-      setCarHistory(res.data);
+      setCarHistory(ensureArray(res.data));
     } catch (error) {
       toast.error("Erro ao buscar histórico.");
     } finally {
@@ -211,11 +212,11 @@ export default function AdminCarPanel({ currentUserEmail }) {
 
   // Filtra os carros com base no botão clicado
   const filteredCars = filterCategory === 'Todas' 
-    ? cars 
-    : cars.filter(car => normalizeCategory(car.categoria) === filterCategory);
+    ? (Array.isArray(cars) ? cars : [])
+    : (Array.isArray(cars) ? cars : []).filter(car => normalizeCategory(car.categoria) === filterCategory);
 
   // Filtro Inteligente do Resumo Financeiro
-  const filteredCosts = costs.filter(cost => {
+  const filteredCosts = (Array.isArray(costs) ? costs : []).filter(cost => {
     const matchMes = costFilters.mes ? cost.dataServico.startsWith(costFilters.mes) : true;
     const matchCarro = costFilters.carId ? cost.carId === costFilters.carId : true;
     const matchCat = costFilters.categoria ? cost.carCategoria === costFilters.categoria : true;
@@ -391,7 +392,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeBookings.map(booking => (
+                  {(Array.isArray(activeBookings) ? activeBookings : []).map(booking => (
                     <tr key={booking.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center gap-2 font-bold text-gray-800">
@@ -439,7 +440,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Veículo *</label>
                     <select required name="carId" value={costForm.carId} onChange={handleCostChange} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 outline-none focus:border-green-600">
                        <option value="">Selecione o carro...</option>
-                       {cars.map(car => (
+                       {(Array.isArray(cars) ? cars : []).map(car => (
                           <option key={car.id} value={car.id}>{car.modelo} ({car.placa})</option>
                        ))}
                     </select>
@@ -506,7 +507,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
                  <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">Veículo Específico</label>
                  <select name="carId" value={costFilters.carId} onChange={handleFilterChange} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500">
                     <option value="">Todos os Veículos</option>
-                    {cars.map(car => (<option key={car.id} value={car.id}>{car.modelo} ({car.placa})</option>))}
+                    {(Array.isArray(cars) ? cars : []).map(car => (<option key={car.id} value={car.id}>{car.modelo} ({car.placa})</option>))}
                  </select>
               </div>
               <div className="flex-1 w-full">
@@ -615,7 +616,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
                   </div>
                ) : (
                   <div className="space-y-3">
-                     {carHistory.map(viagem => (
+                     {(Array.isArray(carHistory) ? carHistory : []).map(viagem => (
                         <div key={viagem.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row justify-between gap-4">
                            <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">

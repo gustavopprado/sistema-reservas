@@ -4,7 +4,7 @@ import { Users, Gauge, CalendarCheck, Info, ChevronLeft, ChevronRight, Car, Sett
 export default function CarList({ cars, onReserve }) {
   
   // 1. O FILTRO INTELIGENTE: Só mostra carros da categoria "Reserva" 
-  const availableCars = cars.filter(car => car.categoria === 'Reserva');
+  const availableCars = (Array.isArray(cars) ? cars : []).filter(car => car.categoria === 'Reserva');
 
   if (availableCars.length === 0) {
     return (

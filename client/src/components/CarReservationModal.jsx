@@ -4,6 +4,7 @@ import api from '../api';
 import toast from 'react-hot-toast';
 
 export default function CarReservationModal({ car, onClose, onSuccess, currentUserEmail }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [formData, setFormData] = useState({
     startDate: new Date().toISOString().split('T')[0],
     startTime: '08:00',
@@ -27,7 +28,7 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
       const response = await api.get('/car-bookings/search', {
         params: { carId: car.id }
       });
-      setBusySlots(response.data);
+      setBusySlots(ensureArray(response.data));
     } catch (err) {
       console.error("Erro ao buscar agenda:", err);
     } finally {
@@ -165,7 +166,7 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
                 <p className="text-xs text-gray-400">Nenhuma reserva futura.</p>
               </div>
             ) : (
-              busySlots.map((slot) => (
+              (Array.isArray(busySlots) ? busySlots : []).map((slot) => (
                 <div key={slot.id} className="bg-white border-l-4 border-blue-400 p-3 rounded-r-lg shadow-sm border border-gray-100">
                   <div className="flex flex-col text-xs text-gray-600 mb-1.5 font-medium bg-gray-50 p-1.5 rounded">
                     <span className="text-gray-500 mb-1">Retirada: <b className="text-gray-800">{formatDate(slot.startDate)} às {slot.startTime}</b></span>

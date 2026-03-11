@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 
 
 export default function MyBookings({ userEmail, onEdit }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -14,12 +15,16 @@ export default function MyBookings({ userEmail, onEdit }) {
   }, [userEmail]);
 
   const fetchMyBookings = () => {
-    api.get('/my-bookings', { params: { userEmail } })
+    api.get('/bookings/my', { params: { email: userEmail } })
       .then(res => {
-        setBookings(res.data);
+        setBookings(ensureArray(res.data));
         setLoading(false);
       })
-      .catch(err => console.error(err));
+      .catch(err => {
+        console.error(err);
+        setBookings([]);
+        setLoading(false);
+      });
   };
 
   const handleCancel = (bookingId) => {
@@ -99,7 +104,7 @@ export default function MyBookings({ userEmail, onEdit }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {bookings.map(booking => (
+          {(Array.isArray(bookings) ? bookings : []).map(booking => (
             <div key={booking.id} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between gap-4 hover:shadow-md transition-shadow group">
               
               <div className="flex-1">
