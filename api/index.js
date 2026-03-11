@@ -61,9 +61,10 @@ app.post('/bookings', async (req, res) => {
     if (startDateTime >= endDateTime) return res.status(400).json({ error: "Horário final deve ser maior que o inicial." });
     if (startDateTime < now) return res.status(400).json({ error: "Não é possível criar reservas no passado." });
 
+    // --- CORREÇÃO AQUI: Filtrando emails vazios caso o usuário deixe uma vírgula sobrando ---
     let attendeesList = [];
     if (attendees && attendees.trim().length > 0) {
-        attendeesList = attendees.split(',').map(e => e.trim());
+        attendeesList = attendees.split(',').map(e => e.trim()).filter(e => e !== '');
     }
 
     const bookingsRef = db.collection('bookings');
@@ -79,14 +80,22 @@ app.post('/bookings', async (req, res) => {
 
     if (conflito) return res.status(409).json({ error: "Já existe uma reserva neste horário!" });
 
+    // --- CORREÇÃO AQUI: Inserindo o array "convidados" no banco de dados ---
     const novaReserva = {
-      roomId, roomName, date, startTime, endTime, userEmail,
+      roomId,
+      roomName,
+      date,
+      startTime,
+      endTime,
+      userEmail,
       title: title || 'Reunião Reservada',
       attendees: attendees || '', 
+      convidados: attendeesList,
       createdAt: new Date().toISOString()
     };
 
     await bookingsRef.add(novaReserva);
+    
     const googleLink = await createCalendarEvent({ ...novaReserva, attendeesList });
 
     const destinatariosUnicos = new Set([...attendeesList, userEmail]);
@@ -99,6 +108,7 @@ app.post('/bookings', async (req, res) => {
     res.status(201).json({ success: true, message: "Sala reservada com sucesso!", googleEventLink: googleLink });
 
   } catch (error) {
+    console.error("Erro na rota de reserva:", error);
     res.status(500).json({ error: "Erro interno ao processar reserva." });
   }
 });
@@ -162,25 +172,76 @@ app.delete('/bookings/:id', async (req, res) => {
   }
 });
 
-// ROTA 5: Listar minhas reservas (Dono e Convidado)
-app.get('/bookings/my', async (req, res) => {
+// ROTA 5: Editar (PUT)
+app.put('/bookings/:id', async (req, res) => {
   try {
-    const { email } = req.query;
-    if (!email) return res.status(400).json({ error: "Email obrigatório" });
+    const { id } = req.params;
+    const { date, startTime, endTime, attendees, title, userEmail, roomId } = req.body;
 
-    const snapshotOwner = await db.collection('bookings').where('userEmail', '==', email).get();
-    const snapshotGuest = await db.collection('bookings').where('convidados', 'array-contains', email).get();
+    const docRef = db.collection('bookings').doc(id);
+    const doc = await docRef.get();
+    if (!doc.exists) return res.status(404).json({ error: "Reserva não encontrada" });
 
-    const bookingsMap = new Map();
-    snapshotOwner.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
-    snapshotGuest.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+    const currentData = doc.data();
 
-    const bookings = Array.from(bookingsMap.values());
-    bookings.sort((a, b) => new Date(`${b.date}T${b.startTime}`) - new Date(`${a.date}T${a.startTime}`));
+    if (currentData.userEmail !== userEmail && userEmail !== ADMIN_EMAIL) {
+        return res.status(403).json({ error: "Permissão negada." });
+    }
+    
+    const targetRoomId = roomId || currentData.roomId;
+    if (targetRoomId === RESTRICTED_ROOM_ID && userEmail !== ADMIN_EMAIL) {
+         return res.status(403).json({ error: "Apenas Admin pode usar esta sala." });
+    }
 
-    res.json(bookings);
+    const startDateTime = new Date(`${date}T${startTime}:00`);
+    const endDateTime = new Date(`${date}T${endTime}:00`);
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - 10);
+
+    if (startDateTime >= endDateTime) return res.status(400).json({ error: "Horário inválido" });
+    if (startDateTime < now) return res.status(400).json({ error: "Não é possível mover para o passado." });
+
+    const snapshot = await db.collection('bookings')
+        .where('roomId', '==', targetRoomId)
+        .where('date', '==', date)
+        .get();
+
+    let conflito = false;
+    snapshot.forEach(otherDoc => {
+        if (otherDoc.id !== id) {
+            const r = otherDoc.data();
+            const rStart = new Date(`${r.date}T${r.startTime}:00`);
+            const rEnd = new Date(`${r.date}T${r.endTime}:00`);
+            if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
+        }
+    });
+
+    if (conflito) return res.status(409).json({ error: "Novo horário indisponível!" });
+
+    const updatedData = {
+        roomId: targetRoomId,
+        date, startTime, endTime, 
+        title: title || currentData.title || 'Reunião',
+        attendees: attendees || ''
+    };
+
+    await docRef.update(updatedData);
+
+    let attendeesList = [];
+    if (updatedData.attendees && updatedData.attendees.trim().length > 0) {
+        attendeesList = updatedData.attendees.split(',').map(e => e.trim());
+    }
+    const destinatariosUnicos = new Set([...attendeesList, currentData.userEmail]);
+    const listaFinalEmails = Array.from(destinatariosUnicos);
+
+    if (listaFinalEmails.length > 0) {
+        await sendUpdateEmail({ ...currentData, ...updatedData }, listaFinalEmails);
+    }
+    
+    res.json({ success: true, message: "Reserva atualizada com sucesso!" });
+
   } catch (error) {
-    res.status(500).json({ error: "Erro interno ao buscar as reservas." });
+    res.status(500).json({ error: "Erro ao atualizar." });
   }
 });
 
@@ -206,6 +267,42 @@ app.put('/bookings/:id/rsvp', async (req, res) => {
   }
 });
 
+// ROTA 7: Buscar Minhas Reservas (Dono) e Convites (Convidado)
+app.get('/bookings/my', async (req, res) => {
+  try {
+    const { email } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({ error: "Email obrigatório" });
+    }
+
+    // 1. Busca as reservas onde o usuário é o DONO
+    const snapshotOwner = await db.collection('bookings')
+      .where('userEmail', '==', email)
+      .get();
+
+    // 2. Busca as reservas onde o usuário é CONVIDADO (está dentro do array 'convidados')
+    const snapshotGuest = await db.collection('bookings')
+      .where('convidados', 'array-contains', email)
+      .get();
+
+    // Usamos um Map para juntar as duas listas sem duplicar (caso ele seja dono e se convide)
+    const bookingsMap = new Map();
+
+    snapshotOwner.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+    snapshotGuest.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+    const bookings = Array.from(bookingsMap.values());
+
+    // Ordena as reservas por data
+    bookings.sort((a, b) => new Date(`${b.date}T${b.startTime}`) - new Date(`${a.date}T${a.startTime}`));
+
+    res.json(bookings);
+  } catch (error) {
+    console.error("Erro ao buscar minhas reservas e convites:", error);
+    res.status(500).json({ error: "Erro interno ao buscar as reservas." });
+  }
+});
 
 // ==========================================
 //          ROTAS DE VEÍCULOS (FROTA)
@@ -502,7 +599,7 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4411;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
