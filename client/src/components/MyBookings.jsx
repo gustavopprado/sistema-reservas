@@ -4,6 +4,7 @@ import { Trash2, Calendar, Clock, Pencil, AlertTriangle } from 'lucide-react';
 // 1. IMPORTAR TOAST
 import toast from 'react-hot-toast';
 
+
 export default function MyBookings({ userEmail, onEdit }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +27,7 @@ export default function MyBookings({ userEmail, onEdit }) {
     toast((t) => (
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 font-bold text-gray-800">
-            <AlertTriangle className="text-orange-500" size={20} />
+            <AlertTriangle className="text-[#0c6192]" size={20} />
             <span>Cancelar reserva?</span>
         </div>
         <p className="text-sm text-gray-600">Essa ação não pode ser desfeita.</p>
