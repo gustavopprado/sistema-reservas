@@ -2,20 +2,29 @@ import { useState, useEffect } from 'react'
 import api from './api'
 import { auth } from './firebase-config' 
 import { onAuthStateChanged, signOut } from 'firebase/auth' 
+import { Toaster } from 'react-hot-toast';
+
+// Componentes Antigos (Salas)
 import RoomList from './components/RoomList'
 import ReservationModal from './components/ReservationModal'
 import DailyView from './components/DailyView'
 import LoginScreen from './components/LoginScreen'
 import MyBookings from './components/MyBookings' 
-import { Calendar, LayoutGrid, CalendarDays, LogOut, List } from 'lucide-react'
+import CarSystem from './components/CarSystem'
 
-// 1. IMPORTAR O TOASTER
-import { Toaster } from 'react-hot-toast';
+// Novos Componentes
+import HubSelection from './components/HubSelection'
+import { Calendar, LayoutGrid, CalendarDays, LogOut, List, ArrowLeft } from 'lucide-react'
 
 function App() {
   const [user, setUser] = useState(null)
-  const [rooms, setRooms] = useState([])
   const [loading, setLoading] = useState(true)
+  
+  // NOVO ESTADO: Controla qual sistema estamos ('hub', 'rooms', ou 'cars')
+  const [activeSystem, setActiveSystem] = useState('hub') 
+
+  // Estados do sistema de SALAS
+  const [rooms, setRooms] = useState([])
   const [viewMode, setViewMode] = useState('cards')
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -26,7 +35,11 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (currentUser) fetchRooms();
+      if (currentUser) {
+        fetchRooms(); // Continua buscando as salas no fundo
+      } else {
+        setLoading(false);
+      }
     });
     return () => unsubscribe();
   }, [])
@@ -43,8 +56,12 @@ function App() {
       })
   }
 
-  if (!user) return <LoginScreen />;
+  const handleLogout = async () => {
+    await signOut(auth);
+    setActiveSystem('hub'); // Reseta o sistema ao deslogar
+  }
 
+  // --- Funções do Sistema de Salas ---
   const handleOpenModal = (room, date = '', time = '') => {
     setEditingBooking(null) 
     setSelectedRoom(room)
@@ -55,10 +72,7 @@ function App() {
 
   const handleEditBooking = (booking) => {
     setEditingBooking(booking)
-    const room = rooms.find(r => r.id === booking.roomId) || { 
-        id: booking.roomId, 
-        nome: booking.roomName 
-    }
+    const room = rooms.find(r => r.id === booking.roomId) || { id: booking.roomId, nome: booking.roomName }
     setSelectedRoom(room)
     setIsModalOpen(true)
   }
@@ -70,28 +84,41 @@ function App() {
   }
 
   const handleSuccess = () => {
-    // Agora não precisamos de alert aqui, o modal vai disparar o toast
-    // Apenas recarregamos a página após um pequeno delay para o usuário ver o sucesso
-    setTimeout(() => {
-        window.location.reload()
-    }, 1500);
+    setTimeout(() => { window.location.reload() }, 1500);
   }
 
-  const handleLogout = async () => {
-    await signOut(auth);
+  if (!user && !loading) return <LoginScreen />;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand"></div></div>;
+
+  // --- RENDERIZAÇÃO CONDICIONAL DO HUB ---
+  if (activeSystem === 'hub') {
+    return <HubSelection user={user} onSelectSystem={setActiveSystem} onLogout={handleLogout} />
   }
 
+  // --- RENDERIZAÇÃO DO SISTEMA DE CARROS (Em breve) ---
+  if (activeSystem === 'cars') {
+    return <CarSystem user={user} onBack={() => setActiveSystem('hub')} />
+  }
+
+  // --- RENDERIZAÇÃO DO SISTEMA DE SALAS (O que já existe) ---
   return (
-    <div className="min-h-screen bg-gray-50 font-sans">
-      {/* 2. CONFIGURAR O TOASTER (Pode ficar aqui no topo ou no fundo) */}
+    <div className="min-h-screen bg-gray-50 font-sans animate-fade-in">
       <Toaster position="top-center" reverseOrder={false} />
 
       <header className="bg-white shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div className="flex items-center gap-2">
+             {/* BOTÃO DE VOLTAR AO HUB */}
+             <button 
+                onClick={() => setActiveSystem('hub')}
+                className="mr-2 p-2 text-gray-400 hover:text-brand hover:bg-blue-50 rounded-full transition-colors"
+                title="Voltar ao Início"
+             >
+                <ArrowLeft size={24} />
+             </button>
+             <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
                 <Calendar className="text-brand" size={28} />
-                <h1 className="text-xl font-bold text-gray-800 hidden md:block border-l border-gray-300 pl-3 ml-1">
+                <h1 className="text-xl font-bold text-gray-800 hidden md:block ml-1">
                   Reserva de Salas
                 </h1>
              </div>
@@ -99,26 +126,14 @@ function App() {
           
           <div className="flex items-center gap-4">
             <div className="flex bg-gray-100 p-1 rounded-lg">
-              <button 
-                onClick={() => setViewMode('cards')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'cards' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                <LayoutGrid size={18} />
-                <span className="hidden md:inline">Salas</span>
+              <button onClick={() => setViewMode('cards')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'cards' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                <LayoutGrid size={18} /> <span className="hidden md:inline">Salas</span>
               </button>
-              <button 
-                onClick={() => setViewMode('agenda')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'agenda' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                <CalendarDays size={18} />
-                <span className="hidden md:inline">Agenda Geral</span>
+              <button onClick={() => setViewMode('agenda')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'agenda' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                <CalendarDays size={18} /> <span className="hidden md:inline">Agenda Geral</span>
               </button>
-              <button 
-                onClick={() => setViewMode('my_bookings')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'my_bookings' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                <List size={18} />
-                <span className="hidden md:inline">Minhas Reservas</span>
+              <button onClick={() => setViewMode('my_bookings')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'my_bookings' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                <List size={18} /> <span className="hidden md:inline">Minhas Reservas</span>
               </button>
             </div>
 
@@ -137,38 +152,15 @@ function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-         {loading ? (
-            <div className="text-center py-20">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand mx-auto mb-4"></div>
-              <p className="text-gray-500">Carregando...</p>
-            </div>
-         ) : (
             <>
-              {viewMode === 'cards' && (
-                <RoomList rooms={rooms} onReserve={handleOpenModal} currentUserEmail={user.email} />
-              )}
-              {viewMode === 'agenda' && (
-                <div className="animate-fade-in-up">
-                  <DailyView rooms={rooms} onReserve={handleOpenModal} onEditBooking={handleEditBooking} currentUserEmail={user.email} />
-                </div>
-              )}
-              {viewMode === 'my_bookings' && (
-                 <MyBookings userEmail={user.email} onEdit={handleEditBooking} />
-              )}
+              {viewMode === 'cards' && <RoomList rooms={rooms} onReserve={handleOpenModal} currentUserEmail={user.email} />}
+              {viewMode === 'agenda' && <div className="animate-fade-in-up"><DailyView rooms={rooms} onReserve={handleOpenModal} onEditBooking={handleEditBooking} currentUserEmail={user.email} /></div>}
+              {viewMode === 'my_bookings' && <MyBookings userEmail={user.email} onEdit={handleEditBooking} />}
             </>
-         )}
       </main>
 
       {isModalOpen && selectedRoom && (
-        <ReservationModal 
-          room={selectedRoom} 
-          editingBooking={editingBooking} 
-          initialDate={preSelectedDate}
-          initialTime={preSelectedTime}
-          currentUserEmail={user.email}
-          onClose={handleCloseModal}
-          onSuccess={handleSuccess}
-        />
+        <ReservationModal room={selectedRoom} editingBooking={editingBooking} initialDate={preSelectedDate} initialTime={preSelectedTime} currentUserEmail={user.email} onClose={handleCloseModal} onSuccess={handleSuccess} />
       )}
     </div>
   )

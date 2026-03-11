@@ -33,7 +33,7 @@ async function sendInviteEmail(bookingData, attendeesList) {
 
   try {
     await transporter.sendMail({
-      from: '"Sistema de Reservas" <SEU_EMAIL_NOVO@gmail.com>',
+      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
       to: attendeesList,
       // TÍTULO NO ASSUNTO
       subject: `CONVITE: ${displayTitle} - ${bookingData.date.split('-').reverse().join('/')} às ${bookingData.startTime}`,
@@ -86,7 +86,7 @@ async function sendCancellationEmail(bookingData, attendeesList) {
 
   try {
     await transporter.sendMail({
-      from: '"Sistema de Reservas" <SEU_EMAIL_AQUI@gmail.com>',
+      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
       to: attendeesList,
       subject: `CANCELADO: ${bookingData.roomName} - ${bookingData.date.split('-').reverse().join('/')}`,
       text: `A reunião na ${bookingData.roomName} foi cancelada.`,
@@ -122,7 +122,7 @@ async function sendUpdateEmail(bookingData, attendeesList) {
 
   try {
     await transporter.sendMail({
-      from: '"Sistema de Reservas" <SEU_EMAIL_AQUI@gmail.com>',
+      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
       to: attendeesList,
       subject: `ALTERAÇÃO: ${bookingData.title || 'Reunião'} - ${bookingData.date.split('-').reverse().join('/')}`,
       text: `A reunião foi alterada. Verifique os novos detalhes.`,
@@ -138,4 +138,90 @@ async function sendUpdateEmail(bookingData, attendeesList) {
   }
 }
 
-module.exports = { sendInviteEmail, sendCancellationEmail, sendUpdateEmail };
+// --- EMAILS DE VEÍCULOS ---
+const EMAIL_SUPRIMENTOS = 'suprimentos@fgvtn.com.br';
+const URL_SISTEMA = 'http://10.40.125.2:5173'; // IP do seu sistema frontend
+
+const sendCarReservationEmail = async (reserva) => {
+  const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
+
+  // 1. Email para o funcionário
+  await transporter.sendMail({
+    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    to: reserva.userEmail,
+    subject: `🚗 Reserva Confirmada: ${reserva.carModel || reserva.carModelo}`,
+    html: `
+      <h2>Sua reserva foi confirmada!</h2>
+      <p>Veículo: <b>${reserva.carModel || reserva.carModelo}</b></p>
+      <p><b>Retirada:</b> ${reserva.startDate} às ${reserva.startTime}</p>
+      <p><b>Devolução:</b> ${reserva.endDate} às ${reserva.endTime}</p>
+      <p><b>Destino:</b> ${reserva.destino}</p>
+      <p>Lembre-se de registrar a devolução no sistema ao terminar a viagem.</p>
+    `
+  });
+
+  // 2. Email para Suprimentos
+  await transporter.sendMail({
+    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    to: EMAIL_SUPRIMENTOS,
+    subject: `NOVA RESERVA - Veículo: ${reserva.carModel || reserva.carModelo}`,
+    html: `
+      <h2>Nova Reserva de Frota</h2>
+      <p>O colaborador <b>${reserva.userEmail}</b> reservou um veículo.</p>
+      <p><b>Veículo:</b> ${reserva.carModel || reserva.carModelo}</p>
+      <p><b>Período:</b> ${reserva.startDate} (${reserva.startTime}) até ${reserva.endDate} (${reserva.endTime})</p>
+      <p><b>Destino:</b> ${reserva.destino}</p>
+    `
+  });
+};
+
+const sendCarReturnEmail = async (reserva) => {
+  const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
+
+  // 1. Email para o funcionário
+  await transporter.sendMail({
+    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    to: reserva.userEmail,
+    subject: `✅ Devolução Registrada: ${reserva.carModelo || reserva.carModel}`,
+    html: `
+      <h2>Veículo Devolvido com Sucesso</h2>
+      <p>A devolução do veículo <b>${reserva.carModelo || reserva.carModel}</b> foi registrada no sistema.</p>
+      <p><b>KM Final:</b> ${reserva.kmRetorno}</p>
+      <p><b>Nível do Tanque:</b> ${reserva.nivelTanque}</p>
+      <p>Obrigado por utilizar a frota corporativa!</p>
+    `
+  });
+
+  // 2. Email para Suprimentos
+  await transporter.sendMail({
+    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    to: EMAIL_SUPRIMENTOS,
+    subject: `VEÍCULO DEVOLVIDO - ${reserva.carModelo || reserva.carModel}`,
+    html: `
+      <h2>Registro de Devolução</h2>
+      <p>O colaborador <b>${reserva.userEmail}</b> finalizou a viagem.</p>
+      <p><b>Veículo:</b> ${reserva.carModelo || reserva.carModel}</p>
+      <p><b>KM Retorno:</b> ${reserva.kmRetorno}</p>
+      <p><b>Nível do Tanque:</b> ${reserva.nivelTanque}</p>
+    `
+  });
+};
+
+const sendCarReminderEmail = async (reserva) => {
+  const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
+
+  await transporter.sendMail({
+    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    to: reserva.userEmail,
+    subject: `⚠️ Lembrete: Devolução do Veículo ${reserva.carModel || reserva.carModelo}`,
+    html: `
+      <h2>O período da sua viagem está acabando!</h2>
+      <p>Sua reserva do veículo <b>${reserva.carModel || reserva.carModelo}</b> está prevista para encerrar em breve (${reserva.endDate} às ${reserva.endTime}).</p>
+      <p>Não se esqueça de acessar o sistema e realizar a devolução oficial (informando a KM e o combustível).</p>
+      <br>
+      <a href="${URL_SISTEMA}" style="background-color: #0c6192; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Acessar Sistema para Devolver</a>
+    `
+  });
+};
+
+module.exports = { sendInviteEmail, sendCancellationEmail, sendUpdateEmail, sendCarReservationEmail, sendCarReturnEmail, sendCarReminderEmail };

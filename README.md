@@ -128,7 +128,7 @@ Inicie o backend e o frontend em terminais separados:
 ```
 cd api
 npm run dev
-# Roda em http://localhost:3000
+# Roda em http://10.40.125.2:4411 (configure PORT=4411 no .env)
 ```
 
 **Terminal 2 (Client):**
