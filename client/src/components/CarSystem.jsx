@@ -8,6 +8,7 @@ import MyCarBookings from './MyCarBookings';
 import AdminCarPanel from './AdminCarPanel';
 
 export default function CarSystem({ user, onBack }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list', 'my_bookings', 'admin'
@@ -39,7 +40,7 @@ export default function CarSystem({ user, onBack }) {
     setLoading(true);
     api.get('/cars')
       .then(res => {
-        setCars(res.data);
+        setCars(ensureArray(res.data));
         setLoading(false);
       })
       .catch(err => {

@@ -3,9 +3,12 @@ import RoomCard from './RoomCard';
 
 // Recebemos 'currentUserEmail' aqui nas props
 export default function RoomList({ rooms, onReserve, currentUserEmail }) {
+  // Garantir que rooms é um array
+  const roomList = Array.isArray(rooms) ? rooms : [];
+  
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in-up">
-      {rooms.map((room) => (
+      {roomList.map((room) => (
         <RoomCard 
           key={room.id} 
           room={room} 

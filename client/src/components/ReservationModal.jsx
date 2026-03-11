@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 export default function ReservationModal({ 
   room, onClose, onSuccess, initialDate, initialTime, currentUserEmail, editingBooking 
 }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [formData, setFormData] = useState({
     title: '',
     date: initialDate || new Date().toISOString().split('T')[0],
@@ -59,9 +60,10 @@ export default function ReservationModal({
       const response = await api.get('/bookings/search', {
         params: { roomId: room.id, date: formData.date }
       });
+      const bookings = ensureArray(response.data);
       const slots = editingBooking 
-        ? response.data.filter(b => b.id !== editingBooking.id)
-        : response.data;
+        ? bookings.filter(b => b.id !== editingBooking.id)
+        : bookings;
       setBusySlots(slots);
     } catch (err) {
       console.error("Erro ao buscar agenda:", err);

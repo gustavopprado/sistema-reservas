@@ -4,6 +4,7 @@ import { Calendar, MapPin, CheckCircle, Gauge, Fuel, X, Trash2, CarFront } from 
 import toast from 'react-hot-toast';
 
 export default function MyCarBookings({ userEmail }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [bookings, setBookings] = useState([]);
   const [cars, setCars] = useState([]); // Agora baixamos os carros também
   const [loading, setLoading] = useState(true);
@@ -24,10 +25,12 @@ export default function MyCarBookings({ userEmail }) {
         api.get('/car_bookings/my', { params: { email: userEmail } }),
         api.get('/cars')
       ]);
-      setBookings(resBookings.data);
-      setCars(resCars.data);
+      setBookings(ensureArray(resBookings.data));
+      setCars(ensureArray(resCars.data));
     } catch (err) {
       toast.error("Erro ao buscar dados.");
+      setBookings([]);
+      setCars([]);
     } finally {
       setLoading(false);
     }

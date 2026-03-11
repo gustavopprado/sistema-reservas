@@ -71,7 +71,7 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
                   <ChevronRight size={20} />
                 </button>
                 <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 z-10">
-                  {images.map((_, idx) => (
+                  {(Array.isArray(images) ? images : []).map((_, idx) => (
                     <div key={idx} className={`h-1.5 rounded-full transition-all ${idx === currentImgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'}`} />
                   ))}
                 </div>
@@ -114,7 +114,7 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
 
           <div className="mt-3">
             <div className="flex flex-wrap gap-2">
-              {room.equipamentos && room.equipamentos.map((item, index) => (
+              {room.equipamentos && (Array.isArray(room.equipamentos) ? room.equipamentos : []).map((item, index) => (
                 <span key={index} className="px-2 py-1 bg-gray-50 text-gray-600 text-xs rounded-md border border-gray-100">
                   {item}
                 </span>

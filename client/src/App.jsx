@@ -17,6 +17,7 @@ import HubSelection from './components/HubSelection'
 import { Calendar, LayoutGrid, CalendarDays, LogOut, List, ArrowLeft } from 'lucide-react'
 
 function App() {
+  const ensureArray = (value) => Array.isArray(value) ? value : []
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   
@@ -47,7 +48,7 @@ function App() {
   const fetchRooms = () => {
     api.get('/rooms')
       .then(response => {
-        setRooms(response.data)
+        setRooms(ensureArray(response.data))
         setLoading(false)
       })
       .catch(error => {

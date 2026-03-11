@@ -3,6 +3,7 @@ import api from '../api';
 import { Clock, ChevronLeft, ChevronRight, Edit3, Calendar } from 'lucide-react';
 
 export default function DailyView({ rooms, onReserve, onEditBooking, currentUserEmail }) {
+  const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
       const response = await api.get('/bookings/search', {
         params: { date: selectedDate }
       });
-      setBookings(response.data);
+      setBookings(ensureArray(response.data));
     } catch (error) {
       console.error("Erro ao buscar agenda:", error);
     } finally {
@@ -82,7 +83,7 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
         <div className="min-w-[800px]">
           <div className="flex border-b border-gray-200 sticky top-0 bg-white z-10">
             <div className="w-20 flex-shrink-0 bg-gray-50 border-r border-gray-200"></div>
-            {rooms.map(room => (
+            {(Array.isArray(rooms) ? rooms : []).map(room => (
               <div key={room.id} className="flex-1 p-3 text-center font-bold text-gray-700 border-r border-gray-200 min-w-[150px]">
                 {room.nome}
               </div>
@@ -98,7 +99,7 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
                   {time}
                 </div>
 
-                {rooms.map(room => {
+                {(Array.isArray(rooms) ? rooms : []).map(room => {
                   const booking = getBookingForSlot(room.id, time);
                   
                   return (
