@@ -1,11 +1,18 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const cors = require('cors'); 
+const cors = require('cors');
 const app = express();
 const cron = require('node-cron');
 
 const serviceAccount = require('./serviceAccountKey.json');
-const { sendInviteEmail, sendCancellationEmail, sendUpdateEmail, sendCarReservationEmail, sendCarReturnEmail, sendCarReminderEmail } = require('./mailer');
+const {
+  sendInviteEmail,
+  sendCancellationEmail,
+  sendUpdateEmail,
+  sendCarReservationEmail,
+  sendCarReturnEmail,
+  sendCarReminderEmail
+} = require('./mailer');
 const { createCalendarEvent } = require('./calendarService');
 
 // --- CONSTANTES DE ADMINISTRAÇÃO ---
@@ -13,14 +20,14 @@ const ADMIN_EMAIL = 'simone@fgvtn.com.br';
 const RESTRICTED_ROOM_ID = 'BXkxGTCaPe37qS9ZuVvp'; // ID da sala restrita
 
 if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
 }
 
 const db = admin.firestore();
 
-app.use(cors()); 
+app.use(cors());
 app.use(express.json());
 
 // ==========================================
@@ -35,7 +42,7 @@ app.get('/rooms', async (req, res) => {
     roomsSnapshot.forEach(doc => roomsList.push({ id: doc.id, ...doc.data() }));
     res.json(roomsList);
   } catch (error) {
-    res.status(500).json({ error: "Erro ao buscar salas: " + error.message });
+    res.status(500).json({ error: 'Erro ao buscar salas: ' + error.message });
   }
 });
 
@@ -45,42 +52,58 @@ app.post('/bookings', async (req, res) => {
     const { roomId, date, startTime, endTime, userEmail, roomName, attendees, title } = req.body;
 
     if (!roomId || !date || !startTime || !endTime || !userEmail) {
-        return res.status(400).json({ error: "Campos obrigatórios faltando." });
+      return res.status(400).json({ error: 'Campos obrigatórios faltando.' });
     }
 
     if (roomId === RESTRICTED_ROOM_ID && userEmail !== ADMIN_EMAIL) {
-        return res.status(403).json({ error: "Esta sala é restrita apenas à administração." });
+      return res.status(403).json({ error: 'Esta sala é restrita apenas à administração.' });
     }
 
     const startDateTime = new Date(`${date}T${startTime}:00`);
     const endDateTime = new Date(`${date}T${endTime}:00`);
-    
+
     const now = new Date();
     now.setMinutes(now.getMinutes() - 10);
 
-    if (startDateTime >= endDateTime) return res.status(400).json({ error: "Horário final deve ser maior que o inicial." });
-    if (startDateTime < now) return res.status(400).json({ error: "Não é possível criar reservas no passado." });
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'Horário final deve ser maior que o inicial.' });
+    }
 
-    // --- CORREÇÃO AQUI: Filtrando emails vazios caso o usuário deixe uma vírgula sobrando ---
+    if (startDateTime < now) {
+      return res.status(400).json({ error: 'Não é possível criar reservas no passado.' });
+    }
+
     let attendeesList = [];
     if (attendees && attendees.trim().length > 0) {
-        attendeesList = attendees.split(',').map(e => e.trim()).filter(e => e !== '');
+      attendeesList = attendees
+        .split(',')
+        .map(e => e.trim())
+        .filter(e => e !== '');
     }
 
     const bookingsRef = db.collection('bookings');
-    const snapshot = await bookingsRef.where('roomId', '==', roomId).where('date', '==', date).get();
+    const snapshot = await bookingsRef
+      .where('roomId', '==', roomId)
+      .where('date', '==', date)
+      .get();
 
     let conflito = false;
     snapshot.forEach(doc => {
-       const reserva = doc.data();
-       const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
-       const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
-       if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
+      const reserva = doc.data();
+      const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
+      const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
+      if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
     });
 
-    if (conflito) return res.status(409).json({ error: "Já existe uma reserva neste horário!" });
+    if (conflito) {
+      return res.status(409).json({ error: 'Já existe uma reserva neste horário!' });
+    }
 
-    // --- CORREÇÃO AQUI: Inserindo o array "convidados" no banco de dados ---
+    const guestStatuses = {};
+    attendeesList.forEach(email => {
+      guestStatuses[email] = 'pendente';
+    });
+
     const novaReserva = {
       roomId,
       roomName,
@@ -89,27 +112,31 @@ app.post('/bookings', async (req, res) => {
       endTime,
       userEmail,
       title: title || 'Reunião Reservada',
-      attendees: attendees || '', 
+      attendees: attendees || '',
       convidados: attendeesList,
+      guestStatuses,
       createdAt: new Date().toISOString()
     };
 
     await bookingsRef.add(novaReserva);
-    
+
     const googleLink = await createCalendarEvent({ ...novaReserva, attendeesList });
 
     const destinatariosUnicos = new Set([...attendeesList, userEmail]);
     const listaFinalEmails = Array.from(destinatariosUnicos);
 
     if (listaFinalEmails.length > 0) {
-        await sendInviteEmail(novaReserva, listaFinalEmails); 
+      await sendInviteEmail(novaReserva, listaFinalEmails);
     }
 
-    res.status(201).json({ success: true, message: "Sala reservada com sucesso!", googleEventLink: googleLink });
-
+    res.status(201).json({
+      success: true,
+      message: 'Sala reservada com sucesso!',
+      googleEventLink: googleLink
+    });
   } catch (error) {
-    console.error("Erro na rota de reserva:", error);
-    res.status(500).json({ error: "Erro interno ao processar reserva." });
+    console.error('Erro na rota de reserva:', error);
+    res.status(500).json({ error: 'Erro interno ao processar reserva.' });
   }
 });
 
@@ -117,19 +144,19 @@ app.post('/bookings', async (req, res) => {
 app.get('/bookings/search', async (req, res) => {
   try {
     const { roomId, date } = req.query;
-    if (!date) return res.status(400).json({ error: "Date é obrigatório" });
+    if (!date) return res.status(400).json({ error: 'Date é obrigatório' });
 
     let query = db.collection('bookings').where('date', '==', date);
     if (roomId) query = query.where('roomId', '==', roomId);
 
-    const snapshot = await query.get(); 
+    const snapshot = await query.get();
     const bookings = [];
     snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
     bookings.sort((a, b) => a.startTime.localeCompare(b.startTime));
 
     res.json(bookings);
   } catch (error) {
-    res.status(500).json({ error: "Erro ao buscar agenda." });
+    res.status(500).json({ error: 'Erro ao buscar agenda.' });
   }
 });
 
@@ -137,38 +164,44 @@ app.get('/bookings/search', async (req, res) => {
 app.delete('/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const userEmail = req.query?.email || req.body?.userEmail; 
+    const userEmail = req.query?.email || req.body?.userEmail;
 
     const docRef = db.collection('bookings').doc(id);
     const doc = await docRef.get();
 
-    if (!doc.exists) return res.status(404).json({ error: "Reserva não encontrada." });
+    if (!doc.exists) return res.status(404).json({ error: 'Reserva não encontrada.' });
     const bookingData = doc.data();
 
     if (userEmail && bookingData.userEmail !== userEmail && userEmail !== ADMIN_EMAIL) {
-      return res.status(403).json({ error: "Permissão negada. Apenas o dono ou Admin podem cancelar." });
+      return res.status(403).json({ error: 'Permissão negada. Apenas o dono ou Admin podem cancelar.' });
     }
 
     let attendeesList = [];
     if (bookingData.convidados && Array.isArray(bookingData.convidados)) {
-        attendeesList = bookingData.convidados;
+      attendeesList = bookingData.convidados;
     } else if (bookingData.attendees && typeof bookingData.attendees === 'string') {
-        attendeesList = bookingData.attendees.split(',').map(e => e.trim());
+      attendeesList = bookingData.attendees
+        .split(',')
+        .map(e => e.trim())
+        .filter(e => e !== '');
     }
 
     await docRef.delete();
 
     try {
-        const destinatariosUnicos = new Set([...attendeesList, bookingData.userEmail]);
-        const listaFinalEmails = Array.from(destinatariosUnicos).filter(email => email);
-        if (listaFinalEmails.length > 0 && typeof sendCancellationEmail === 'function') {
-            await sendCancellationEmail(bookingData, listaFinalEmails);
-        }
-    } catch (emailError) {}
+      const destinatariosUnicos = new Set([...attendeesList, bookingData.userEmail]);
+      const listaFinalEmails = Array.from(destinatariosUnicos).filter(email => email);
+      if (listaFinalEmails.length > 0 && typeof sendCancellationEmail === 'function') {
+        await sendCancellationEmail(bookingData, listaFinalEmails);
+      }
+    } catch (emailError) {
+      console.error('Erro ao enviar e-mail de cancelamento:', emailError);
+    }
 
-    res.json({ success: true, message: "Reserva cancelada." });
+    res.json({ success: true, message: 'Reserva cancelada.' });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno ao cancelar." });
+    console.error('Erro ao cancelar reserva:', error);
+    res.status(500).json({ error: 'Erro interno ao cancelar.' });
   }
 });
 
@@ -180,17 +213,17 @@ app.put('/bookings/:id', async (req, res) => {
 
     const docRef = db.collection('bookings').doc(id);
     const doc = await docRef.get();
-    if (!doc.exists) return res.status(404).json({ error: "Reserva não encontrada" });
+    if (!doc.exists) return res.status(404).json({ error: 'Reserva não encontrada' });
 
     const currentData = doc.data();
 
     if (currentData.userEmail !== userEmail && userEmail !== ADMIN_EMAIL) {
-        return res.status(403).json({ error: "Permissão negada." });
+      return res.status(403).json({ error: 'Permissão negada.' });
     }
-    
+
     const targetRoomId = roomId || currentData.roomId;
     if (targetRoomId === RESTRICTED_ROOM_ID && userEmail !== ADMIN_EMAIL) {
-         return res.status(403).json({ error: "Apenas Admin pode usar esta sala." });
+      return res.status(403).json({ error: 'Apenas Admin pode usar esta sala.' });
     }
 
     const startDateTime = new Date(`${date}T${startTime}:00`);
@@ -198,50 +231,73 @@ app.put('/bookings/:id', async (req, res) => {
     const now = new Date();
     now.setMinutes(now.getMinutes() - 10);
 
-    if (startDateTime >= endDateTime) return res.status(400).json({ error: "Horário inválido" });
-    if (startDateTime < now) return res.status(400).json({ error: "Não é possível mover para o passado." });
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'Horário inválido' });
+    }
+
+    if (startDateTime < now) {
+      return res.status(400).json({ error: 'Não é possível mover para o passado.' });
+    }
 
     const snapshot = await db.collection('bookings')
-        .where('roomId', '==', targetRoomId)
-        .where('date', '==', date)
-        .get();
+      .where('roomId', '==', targetRoomId)
+      .where('date', '==', date)
+      .get();
 
     let conflito = false;
     snapshot.forEach(otherDoc => {
-        if (otherDoc.id !== id) {
-            const r = otherDoc.data();
-            const rStart = new Date(`${r.date}T${r.startTime}:00`);
-            const rEnd = new Date(`${r.date}T${r.endTime}:00`);
-            if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
-        }
+      if (otherDoc.id !== id) {
+        const r = otherDoc.data();
+        const rStart = new Date(`${r.date}T${r.startTime}:00`);
+        const rEnd = new Date(`${r.date}T${r.endTime}:00`);
+        if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
+      }
     });
 
-    if (conflito) return res.status(409).json({ error: "Novo horário indisponível!" });
+    if (conflito) {
+      return res.status(409).json({ error: 'Novo horário indisponível!' });
+    }
+
+    let attendeesList = [];
+    if (attendees && attendees.trim().length > 0) {
+      attendeesList = attendees
+        .split(',')
+        .map(e => e.trim())
+        .filter(e => e !== '');
+    }
+
+    const previousStatuses = currentData.guestStatuses || {};
+    const guestStatuses = {};
+
+    attendeesList.forEach(email => {
+      guestStatuses[email] = previousStatuses[email] || 'pendente';
+    });
 
     const updatedData = {
-        roomId: targetRoomId,
-        date, startTime, endTime, 
-        title: title || currentData.title || 'Reunião',
-        attendees: attendees || ''
+      roomId: targetRoomId,
+      roomName: currentData.roomName,
+      date,
+      startTime,
+      endTime,
+      title: title || currentData.title || 'Reunião',
+      attendees: attendees || '',
+      convidados: attendeesList,
+      guestStatuses
     };
 
     await docRef.update(updatedData);
 
-    let attendeesList = [];
-    if (updatedData.attendees && updatedData.attendees.trim().length > 0) {
-        attendeesList = updatedData.attendees.split(',').map(e => e.trim());
-    }
     const destinatariosUnicos = new Set([...attendeesList, currentData.userEmail]);
     const listaFinalEmails = Array.from(destinatariosUnicos);
 
     if (listaFinalEmails.length > 0) {
-        await sendUpdateEmail({ ...currentData, ...updatedData }, listaFinalEmails);
+      await sendUpdateEmail({ ...currentData, ...updatedData }, listaFinalEmails);
     }
-    
-    res.json({ success: true, message: "Reserva atualizada com sucesso!" });
 
+    res.json({ success: true, message: 'Reserva atualizada com sucesso!' });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao atualizar." });
+    console.error('Erro ao atualizar reserva:', error);
+    res.status(500).json({ error: 'Erro ao atualizar.' });
   }
 });
 
@@ -251,19 +307,34 @@ app.put('/bookings/:id/rsvp', async (req, res) => {
     const { id } = req.params;
     const { email, status } = req.body;
 
+    const allowedStatuses = ['aceito', 'recusado', 'pendente'];
+
+    if (!email || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Dados inválidos.' });
+    }
+
     const bookingRef = db.collection('bookings').doc(id);
     const doc = await bookingRef.get();
 
-    if (!doc.exists) return res.status(404).json({ error: "Reserva não encontrada." });
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Reserva não encontrada.' });
+    }
 
     const data = doc.data();
+    const convidados = Array.isArray(data.convidados) ? data.convidados : [];
+
+    if (!convidados.includes(email)) {
+      return res.status(403).json({ error: 'Apenas convidados podem responder ao convite.' });
+    }
+
     const guestStatuses = data.guestStatuses || {};
     guestStatuses[email] = status;
 
     await bookingRef.update({ guestStatuses });
-    res.json({ success: true, message: "Resposta salva com sucesso." });
+    res.json({ success: true, message: 'Resposta salva com sucesso.' });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao atualizar convite." });
+    console.error('Erro ao atualizar convite:', error);
+    res.status(500).json({ error: 'Erro ao atualizar convite.' });
   }
 });
 
@@ -271,36 +342,64 @@ app.put('/bookings/:id/rsvp', async (req, res) => {
 app.get('/bookings/my', async (req, res) => {
   try {
     const { email } = req.query;
-    
+
     if (!email) {
-      return res.status(400).json({ error: "Email obrigatório" });
+      return res.status(400).json({ error: 'Email obrigatório' });
     }
 
-    // 1. Busca as reservas onde o usuário é o DONO
     const snapshotOwner = await db.collection('bookings')
       .where('userEmail', '==', email)
       .get();
 
-    // 2. Busca as reservas onde o usuário é CONVIDADO (está dentro do array 'convidados')
     const snapshotGuest = await db.collection('bookings')
       .where('convidados', 'array-contains', email)
       .get();
 
-    // Usamos um Map para juntar as duas listas sem duplicar (caso ele seja dono e se convide)
     const bookingsMap = new Map();
 
-    snapshotOwner.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
-    snapshotGuest.forEach(doc => bookingsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+    snapshotOwner.forEach(doc => {
+      const data = doc.data();
+      bookingsMap.set(doc.id, {
+        id: doc.id,
+        ...data,
+        isOwner: true,
+        isGuest: false,
+        myGuestStatus: null
+      });
+    });
 
-    const bookings = Array.from(bookingsMap.values());
+    snapshotGuest.forEach(doc => {
+      const data = doc.data();
+      const existing = bookingsMap.get(doc.id);
+      const guestStatuses = data.guestStatuses || {};
 
-    // Ordena as reservas por data
-    bookings.sort((a, b) => new Date(`${b.date}T${b.startTime}`) - new Date(`${a.date}T${a.startTime}`));
+      bookingsMap.set(doc.id, {
+        id: doc.id,
+        ...data,
+        isOwner: existing?.isOwner || false,
+        isGuest: true,
+        myGuestStatus: guestStatuses[email] || 'pendente'
+      });
+    });
+
+    const now = new Date();
+
+    const bookings = Array.from(bookingsMap.values())
+      .filter((booking) => {
+        if (!booking.date || !booking.endTime) return false;
+
+        const bookingEnd = new Date(`${booking.date}T${booking.endTime}:00`);
+        return bookingEnd >= now;
+      })
+      .sort(
+        (a, b) =>
+          new Date(`${a.date}T${a.startTime}`) - new Date(`${b.date}T${b.startTime}`)
+      );
 
     res.json(bookings);
   } catch (error) {
-    console.error("Erro ao buscar minhas reservas e convites:", error);
-    res.status(500).json({ error: "Erro interno ao buscar as reservas." });
+    console.error('Erro ao buscar minhas reservas e convites:', error);
+    res.status(500).json({ error: 'Erro interno ao buscar as reservas.' });
   }
 });
 
@@ -316,7 +415,7 @@ app.get('/cars', async (req, res) => {
     carsSnapshot.forEach(doc => carsList.push({ id: doc.id, ...doc.data() }));
     res.json(carsList);
   } catch (error) {
-    res.status(500).json({ error: "Erro ao buscar veículos: " + error.message });
+    res.status(500).json({ error: 'Erro ao buscar veículos: ' + error.message });
   }
 });
 
@@ -325,45 +424,67 @@ app.post('/car-bookings', async (req, res) => {
   try {
     const { carId, carModel, startDate, startTime, endDate, endTime, userEmail, destino } = req.body;
 
-    if (!carId || !startDate || !startTime || !endDate || !endTime || !userEmail) return res.status(400).json({ error: "Campos obrigatórios faltando." });
+    if (!carId || !startDate || !startTime || !endDate || !endTime || !userEmail) {
+      return res.status(400).json({ error: 'Campos obrigatórios faltando.' });
+    }
 
     const startDateTime = new Date(`${startDate}T${startTime}:00`);
     const endDateTime = new Date(`${endDate}T${endTime}:00`);
     const now = new Date();
     now.setMinutes(now.getMinutes() - 10);
 
-    if (startDateTime >= endDateTime) return res.status(400).json({ error: "A devolução deve ser após a retirada." });
-    if (startDateTime < now) return res.status(400).json({ error: "Não é possível reservar no passado." });
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'A devolução deve ser após a retirada.' });
+    }
+
+    if (startDateTime < now) {
+      return res.status(400).json({ error: 'Não é possível reservar no passado.' });
+    }
 
     const bookingsRef = db.collection('car_bookings');
-    const snapshot = await bookingsRef.where('carId', '==', carId).where('status', 'in', ['ativa', 'em_uso']).get();
+    const snapshot = await bookingsRef
+      .where('carId', '==', carId)
+      .where('status', 'in', ['ativa', 'em_uso'])
+      .get();
 
     let conflito = false;
     snapshot.forEach(doc => {
-       const reserva = doc.data();
-       const rStart = new Date(`${reserva.startDate}T${reserva.startTime}:00`);
-       const rEnd = new Date(`${reserva.endDate}T${reserva.endTime}:00`);
-       if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
+      const reserva = doc.data();
+      const rStart = new Date(`${reserva.startDate}T${reserva.startTime}:00`);
+      const rEnd = new Date(`${reserva.endDate}T${reserva.endTime}:00`);
+      if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
     });
 
-    if (conflito) return res.status(409).json({ error: "Veículo já reservado neste período!" });
+    if (conflito) {
+      return res.status(409).json({ error: 'Veículo já reservado neste período!' });
+    }
 
     const novaReserva = {
-      carId, carModel, startDate, startTime, endDate, endTime, userEmail,
+      carId,
+      carModel,
+      startDate,
+      startTime,
+      endDate,
+      endTime,
+      userEmail,
       destino: destino || 'Não informado',
       status: 'ativa',
-      reminderSent: false, // Flag para controlar o robô de e-mails
+      reminderSent: false,
       createdAt: new Date().toISOString()
     };
 
     await bookingsRef.add(novaReserva);
 
-    // === MÁGICA 1: EMAIL DE RESERVA ===
-    try { await sendCarReservationEmail(novaReserva); } catch (e) { console.error("Erro email:", e); }
+    try {
+      await sendCarReservationEmail(novaReserva);
+    } catch (e) {
+      console.error('Erro email:', e);
+    }
 
-    res.status(201).json({ success: true, message: "Veículo reservado com sucesso!" });
+    res.status(201).json({ success: true, message: 'Veículo reservado com sucesso!' });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno ao processar reserva." });
+    console.error('Erro ao processar reserva de veículo:', error);
+    res.status(500).json({ error: 'Erro interno ao processar reserva.' });
   }
 });
 
@@ -371,20 +492,21 @@ app.post('/car-bookings', async (req, res) => {
 app.get('/car-bookings/search', async (req, res) => {
   try {
     const { carId } = req.query;
-    if (!carId) return res.status(400).json({ error: "carId é obrigatório" });
+    if (!carId) return res.status(400).json({ error: 'carId é obrigatório' });
 
     const snapshot = await db.collection('car_bookings')
       .where('carId', '==', carId)
       .where('status', 'in', ['ativa', 'em_uso'])
-      .get(); 
-      
+      .get();
+
     const bookings = [];
     snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
     bookings.sort((a, b) => new Date(`${a.startDate}T${a.startTime}`) - new Date(`${b.startDate}T${b.startTime}`));
 
     res.json(bookings);
   } catch (error) {
-    res.status(500).json({ error: "Erro ao buscar agenda do veículo." });
+    console.error('Erro ao buscar agenda do veículo:', error);
+    res.status(500).json({ error: 'Erro ao buscar agenda do veículo.' });
   }
 });
 
@@ -392,7 +514,7 @@ app.get('/car-bookings/search', async (req, res) => {
 app.get('/car_bookings/my', async (req, res) => {
   try {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ error: "Email obrigatório" });
+    if (!email) return res.status(400).json({ error: 'Email obrigatório' });
 
     const snapshot = await db.collection('car_bookings').where('userEmail', '==', email).get();
     const bookings = [];
@@ -401,7 +523,8 @@ app.get('/car_bookings/my', async (req, res) => {
 
     res.json(bookings);
   } catch (error) {
-    res.status(500).json({ error: "Erro interno." });
+    console.error('Erro ao buscar viagens do usuário:', error);
+    res.status(500).json({ error: 'Erro interno.' });
   }
 });
 
@@ -413,10 +536,10 @@ app.put('/car_bookings/:id/return', async (req, res) => {
 
     const bookingRef = db.collection('car_bookings').doc(id);
     const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) return res.status(404).json({ error: "Reserva não encontrada." });
+    if (!bookingDoc.exists) return res.status(404).json({ error: 'Reserva não encontrada.' });
+
     const bookingData = bookingDoc.data();
 
-    // Trava do KM
     if (carId && kmRetorno) {
       const carRef = db.collection('cars').doc(carId);
       const carDoc = await carRef.get();
@@ -425,7 +548,10 @@ app.put('/car_bookings/:id/return', async (req, res) => {
         const kmAtualBanco = Number(carData.km_atual || 0);
         const kmDigitado = Number(kmRetorno);
 
-        if (kmDigitado < kmAtualBanco) return res.status(400).json({ error: `KM inválida! O veículo está com ${kmAtualBanco} km.` });
+        if (kmDigitado < kmAtualBanco) {
+          return res.status(400).json({ error: `KM inválida! O veículo está com ${kmAtualBanco} km.` });
+        }
+
         await carRef.update({ km_atual: kmDigitado });
       }
     }
@@ -437,14 +563,16 @@ app.put('/car_bookings/:id/return', async (req, res) => {
       dataDevolucaoReal: new Date().toISOString()
     });
 
-    // === MÁGICA 2: EMAIL DE DEVOLUÇÃO ===
     try {
       await sendCarReturnEmail({ ...bookingData, kmRetorno, nivelTanque });
-    } catch(e) { console.error("Erro email devolução:", e); }
+    } catch (e) {
+      console.error('Erro email devolução:', e);
+    }
 
-    res.json({ success: true, message: "Veículo devolvido com sucesso!" });
+    res.json({ success: true, message: 'Veículo devolvido com sucesso!' });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno na devolução." });
+    console.error('Erro interno na devolução:', error);
+    res.status(500).json({ error: 'Erro interno na devolução.' });
   }
 });
 
@@ -456,9 +584,10 @@ app.delete('/car_bookings/:id', async (req, res) => {
       status: 'cancelada',
       dataCancelamento: new Date().toISOString()
     });
-    res.json({ success: true, message: "Viagem cancelada." });
+    res.json({ success: true, message: 'Viagem cancelada.' });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno ao cancelar." });
+    console.error('Erro ao cancelar viagem:', error);
+    res.status(500).json({ error: 'Erro interno ao cancelar.' });
   }
 });
 
@@ -471,9 +600,10 @@ app.post('/cars', async (req, res) => {
     if (newCar.capacidade) newCar.capacidade = Number(newCar.capacidade);
 
     const docRef = await db.collection('cars').add(newCar);
-    res.status(201).json({ success: true, id: docRef.id, message: "Veículo cadastrado!" });
+    res.status(201).json({ success: true, id: docRef.id, message: 'Veículo cadastrado!' });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao adicionar veículo." });
+    console.error('Erro ao adicionar veículo:', error);
+    res.status(500).json({ error: 'Erro ao adicionar veículo.' });
   }
 });
 
@@ -486,9 +616,10 @@ app.put('/cars/:id', async (req, res) => {
     if (updatedData.capacidade) updatedData.capacidade = Number(updatedData.capacidade);
 
     await db.collection('cars').doc(id).update(updatedData);
-    res.json({ success: true, message: "Veículo atualizado!" });
+    res.json({ success: true, message: 'Veículo atualizado!' });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao atualizar veículo." });
+    console.error('Erro ao atualizar veículo:', error);
+    res.status(500).json({ error: 'Erro ao atualizar veículo.' });
   }
 });
 
@@ -503,7 +634,8 @@ app.get('/cars/:id/history', async (req, res) => {
 
     res.json(history);
   } catch (error) {
-    res.status(500).json({ error: "Erro ao buscar histórico de viagens." });
+    console.error('Erro ao buscar histórico de viagens:', error);
+    res.status(500).json({ error: 'Erro ao buscar histórico de viagens.' });
   }
 });
 
@@ -517,13 +649,12 @@ app.get('/car_bookings/active', async (req, res) => {
     const bookings = [];
     snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
 
-    // Ordena pela data/hora de retirada (para o admin ver quem saiu primeiro)
     bookings.sort((a, b) => new Date(`${a.startDate}T${a.startTime}`) - new Date(`${b.startDate}T${b.startTime}`));
 
     res.json(bookings);
   } catch (error) {
-    console.error("Erro ao buscar viagens ativas gerais:", error);
-    res.status(500).json({ error: "Erro interno." });
+    console.error('Erro ao buscar viagens ativas gerais:', error);
+    res.status(500).json({ error: 'Erro interno.' });
   }
 });
 
@@ -536,13 +667,13 @@ app.post('/car_costs', async (req, res) => {
   try {
     const costData = req.body;
     costData.createdAt = new Date().toISOString();
-    costData.valor = Number(costData.valor); // Garante que o valor seja salvo como número
+    costData.valor = Number(costData.valor);
 
     const docRef = await db.collection('car_costs').add(costData);
-    res.status(201).json({ success: true, id: docRef.id, message: "Custo lançado com sucesso!" });
+    res.status(201).json({ success: true, id: docRef.id, message: 'Custo lançado com sucesso!' });
   } catch (error) {
-    console.error("Erro ao lançar custo:", error);
-    res.status(500).json({ error: "Erro ao registrar o custo do veículo." });
+    console.error('Erro ao lançar custo:', error);
+    res.status(500).json({ error: 'Erro ao registrar o custo do veículo.' });
   }
 });
 
@@ -552,14 +683,13 @@ app.get('/car_costs', async (req, res) => {
     const snapshot = await db.collection('car_costs').get();
     const costs = [];
     snapshot.forEach(doc => costs.push({ id: doc.id, ...doc.data() }));
-    
-    // Ordena do mais recente para o mais antigo
+
     costs.sort((a, b) => new Date(b.dataServico) - new Date(a.dataServico));
 
     res.json(costs);
   } catch (error) {
-    console.error("Erro ao buscar custos:", error);
-    res.status(500).json({ error: "Erro ao buscar histórico de custos." });
+    console.error('Erro ao buscar custos:', error);
+    res.status(500).json({ error: 'Erro ao buscar histórico de custos.' });
   }
 });
 
@@ -571,7 +701,7 @@ cron.schedule('*/15 * * * *', async () => {
   try {
     const snapshot = await db.collection('car_bookings')
       .where('status', '==', 'ativa')
-      .where('reminderSent', '==', false) // Busca só os que ainda não foram avisados
+      .where('reminderSent', '==', false)
       .get();
 
     const now = new Date();
@@ -579,18 +709,16 @@ cron.schedule('*/15 * * * *', async () => {
     snapshot.forEach(async (doc) => {
       const reserva = doc.data();
       const endDateTime = new Date(`${reserva.endDate}T${reserva.endTime}:00`);
-      
-      // Diferença em horas entre Agora e o fim da reserva
+
       const diffHours = (endDateTime - now) / (1000 * 60 * 60);
 
-      // Se faltar 1 hora ou menos para o fim, ou se já passou e a pessoa não devolveu: Dispara!
       if (diffHours <= 1) {
         try {
           await sendCarReminderEmail(reserva);
-          await db.collection('car_bookings').doc(doc.id).update({ reminderSent: true }); // Marca como enviado para não fazer spam
+          await db.collection('car_bookings').doc(doc.id).update({ reminderSent: true });
           console.log(`Lembrete enviado para ${reserva.userEmail} - Carro: ${reserva.carModel}`);
-        } catch(e) {
-          console.error(`Erro ao enviar lembrete automático`, e);
+        } catch (e) {
+          console.error('Erro ao enviar lembrete automático', e);
         }
       }
     });
@@ -599,7 +727,11 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
-const PORT = process.env.PORT || 4411;
+app.get('/teste', (req, res) => {
+  res.send('TESTE API CERTA');
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });

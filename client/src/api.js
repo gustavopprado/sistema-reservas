@@ -6,10 +6,10 @@ function resolveApiUrl() {
 
   if (typeof window !== 'undefined') {
     const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:4411`;
+    return `${protocol}//${hostname}:3000`;
   }
 
-  return 'http://localhost:4411';
+  return 'http://localhost:3000';
 }
 
 const api = axios.create({

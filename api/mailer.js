@@ -140,7 +140,7 @@ async function sendUpdateEmail(bookingData, attendeesList) {
 
 // --- EMAILS DE VEÍCULOS ---
 const EMAIL_SUPRIMENTOS = 'suprimentos@fgvtn.com.br';
-const URL_SISTEMA = 'http://***IP-INTERNO***:5173'; // IP do seu sistema frontend
+const URL_SISTEMA = 'http://***IP-INTERNO***:4411'; // IP do seu sistema frontend
 
 const sendCarReservationEmail = async (reserva) => {
   const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
