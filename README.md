@@ -2,8 +2,6 @@
 
 Plataforma web interna da **FGV** que centraliza o agendamento de **salas de reunião** e a gestão da **frota de veículos corporativos**. Substitui o fluxo anterior baseado em WhatsApp/e-mails por um portal único, com controle de acesso por perfil, notificações automáticas e histórico completo.
 
-Servidor de produção: **http://10.40.125.2:4411** (rede interna)
-
 ---
 
 ## 📌 Visão geral
