@@ -1,245 +1,326 @@
-# 📚 Sistema de Reservas de Salas
+# Portal Corporativo de Reservas — FGV
 
-Este documento fornece uma visão técnica detalhada do repositório **sistema-reservas**. O sistema é uma solução completa para gerenciamento e agendamento de salas de reunião, integrando um backend em Node.js com um frontend moderno em React, oferecendo sincronização com Google Calendar e notificações automáticas.
+Plataforma web interna da **FGV** que centraliza o agendamento de **salas de reunião** e a gestão da **frota de veículos corporativos**. Substitui o fluxo anterior baseado em WhatsApp/e-mails por um portal único, com controle de acesso por perfil, notificações automáticas e histórico completo.
 
-### 📋 Índice
+Servidor de produção: **http://10.40.125.2:4411** (rede interna)
 
-*   [1\. Visão Geral](#visao-geral)
-*   [2\. Arquitetura do Sistema](#arquitetura)
-*   [3\. Tecnologias Utilizadas](#tecnologias)
-*   [4\. Estrutura de Pastas](#estrutura)
-*   [5\. Instalação e Configuração](#instalacao)
-*   [6\. API Endpoints](#api)
-*   [7\. Estrutura de Dados](#banco-dados)
-*   [8\. Componentes React](#frontend)
-*   [9\. Funcionalidades Detalhadas](#funcionalidades)
-*   [10\. Segurança e Permissões](#seguranca)
-*   [11\. Integrações Externas](#integracoes)
+---
 
-## 1\. Visão Geral
+## 📌 Visão geral
 
-O **Sistema de Reservas** foi desenvolvido para solucionar problemas de conflito de agenda e facilitar a reserva de espaços físicos corporativos. O sistema permite que usuários autenticados via Google visualizem a disponibilidade de salas, realizem reservas, recebam convites por e-mail e tenham seus eventos sincronizados automaticamente com suas agendas pessoais.
+O portal atende todos os colaboradores da FGV que precisam reservar recursos físicos da instituição:
 
-**Destaque:** O sistema possui validação inteligente de conflitos de horário, impedindo reservas sobrepostas (double booking) e garantindo a integridade da agenda.
+| Módulo | Usuários típicos | Uso |
+|---|---|---|
+| **Salas de Reunião** | Todos os colaboradores | Agendar salas para reuniões, treinamentos e eventos internos |
+| **Veículos Corporativos** | Colaboradores e equipe de suprimentos | Reservar carros da frota para viagens, visitas e serviços externos |
 
-## 2\. Arquitetura do Sistema
+O acesso é feito via **login Google** (Firebase Authentication). Após autenticado, o usuário é recebido por um **Hub de seleção** onde escolhe qual módulo deseja usar. Cada módulo possui visualizações, regras de negócio e perfis de administração independentes.
 
-O projeto segue uma arquitetura **Monorepo**, separando claramente as responsabilidades entre servidor e cliente:
+---
 
-### Backend (API)
+## 🧱 Stack técnica
 
-Construído com **Node.js** e **Express**, atua como uma API RESTful. Gerencia a lógica de negócios, conexão com o banco de dados Firestore, e integrações de terceiros (Google Calendar, Nodemailer).
+**Backend (`api/`)**
+- **Node.js + Express** — API RESTful, regras de negócio e integrações
+- **Firebase Admin SDK** — acesso ao Firestore (banco de dados)
+- **node-cron** — robôs automáticos de lembrete (a cada 15 min e por hora)
+- **Nodemailer** — envio de e-mails via Gmail SMTP
+- **ical-generator** — convites `.ics` compatíveis com Outlook, Google Calendar e Apple Calendar
+- **Google APIs** — criação de eventos na agenda corporativa via Service Account
 
-### Frontend (Client)
+**Frontend (`client/`)**
+- **React 19 + Vite** — SPA e bundler
+- **TailwindCSS** — estilização
+- **Firebase SDK** — autenticação Google no lado cliente
+- **Axios** — comunicação com a API
+- **react-hot-toast** — notificações visuais inline
+- **lucide-react** — ícones SVG
 
-Uma Single Page Application (SPA) desenvolvida com **React 19** e **Vite**. Utiliza **TailwindCSS** para estilização e comunica-se com a API via Axios.
+**Infraestrutura**
+- **Firebase Firestore** — banco de dados NoSQL (coleções: `rooms`, `bookings`, `cars`, `car_bookings`, `car_costs`)
+- **Gmail SMTP** — `reservas@fgvtn.com.br` como remetente único de todas as notificações
 
-**Fluxo de Dados:** Cliente React → API Express → Firestore Database / Google Calendar API / SMTP Server
+---
 
-## 3\. Tecnologias Utilizadas
+## 🗂️ Estrutura do projeto
 
-### Backend (Server-side)
+```
+sistema-reservas/
+├── api/
+│   ├── index.js                # Entry point — todas as rotas da API e cron jobs
+│   ├── calendarService.js      # Integração com Google Calendar
+│   ├── mailer.js               # E-mails: convites, cancelamentos, frota, lembretes
+│   ├── seed.js                 # Script para popular o banco com dados iniciais
+│   ├── serviceAccountKey.json  # Credenciais Firebase Admin (NÃO versionar)
+│   └── package.json
+│
+└── client/
+    ├── public/
+    │   ├── logo.png
+    │   ├── carros/             # Imagens dos veículos (bongo.png, polo.png, saveiro.png, tcross.png)
+    │   └── salas/              # Fotos das salas de reunião
+    └── src/
+        ├── components/
+        │   ├── HubSelection.jsx            # Tela inicial de seleção de módulo
+        │   ├── LoginScreen.jsx             # Tela de login com Google
+        │   │
+        │   ├── — Módulo Salas —
+        │   ├── RoomList.jsx                # Grade de cards das salas disponíveis
+        │   ├── RoomCard.jsx                # Card individual com status em tempo real
+        │   ├── DailyView.jsx               # Agenda do dia (linha do tempo por sala)
+        │   ├── RoomMonthView.jsx           # Visão mensal de reservas por sala
+        │   ├── ReservationModal.jsx        # Modal de criação e edição de reservas
+        │   ├── MyBookings.jsx              # Reservas próprias e convites recebidos
+        │   │
+        │   └── — Módulo Veículos —
+        │       ├── CarSystem.jsx               # Container principal do módulo de frota
+        │       ├── CarList.jsx                 # Grade de cards dos veículos com status
+        │       ├── CarReservationModal.jsx     # Modal de reserva de veículo
+        │       ├── CarReturnModal.jsx          # Modal de devolução (KM + nível de tanque)
+        │       ├── CarRegularizadaModal.jsx    # Modal para regularizar uso retroativo
+        │       ├── CarDailyView.jsx            # Agenda diária da frota
+        │       ├── CarMonthView.jsx            # Calendário mensal de um veículo
+        │       ├── MyCarBookings.jsx           # Viagens do usuário logado
+        │       ├── AdminCarPanel.jsx           # Painel de administração da frota
+        │       └── CarMaintenancePanel.jsx     # Sub-painel de custos e manutenção
+        │
+        ├── App.jsx             # Roteamento entre Hub / Salas / Veículos
+        ├── api.js              # Instância configurada do Axios
+        └── firebase-config.js  # Configuração do Firebase Client SDK
+```
 
-**Node.js & Express**Runtime e Framework Web
+---
 
-**Firebase Admin**Gerenciamento DB e Auth
+## 🧩 Funcionalidades por módulo
 
-**Google APIs**Integração com Calendar
+### Hub de Seleção
+Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a data atual e dois cards de navegação — um para cada módulo. Serve como ponto de entrada único e permite voltar ao hub a qualquer momento pelo botão na barra superior.
 
-**Nodemailer**Serviço de E-mail
+---
 
-**Ical-generator**Geração de convites .ics
+### Módulo: Salas de Reunião
 
-### Frontend (Client-side)
+**Disponível para todos os usuários autenticados**
 
-**React 19**Biblioteca UI
+- **Visualização em Cards** — lista todas as salas com capacidade, localização e equipamentos. Indica em tempo real se a sala está livre ou ocupada no momento.
+- **Agenda Diária** — linha do tempo visual com os blocos ocupados de cada sala no dia selecionado. Clique em um horário vazio abre o modal de reserva já preenchido.
+- **Visão Mensal** — calendário mensal por sala, destacando os dias com reservas.
+- **Criar Reserva** — formulário com título, data, horário de início/fim e lista de convidados (separados por vírgula). Validação de conflito em tempo real antes de salvar.
+- **Editar Reserva** — altera horário, data e convidados. Envia e-mail de atualização automaticamente para todos os participantes.
+- **Cancelar Reserva** — remove a reserva e envia e-mail de cancelamento com evento iCal para retirar o compromisso da agenda dos convidados.
+- **Minhas Reservas** — lista as reservas do usuário (como organizador) e convites recebidos (como convidado). Permite responder ao convite (RSVP) com aceitar ou recusar.
 
-**Vite**Build Tool
+**Regras de negócio**
 
-**TailwindCSS**Framework CSS
+- Não é permitido criar reservas em horários já ocupados (verificação de overlap no backend).
+- Não é permitido agendar no passado (tolerância de 10 minutos).
+- O horário final deve ser posterior ao inicial.
+- A **Sala Restrita** só pode ser reservada pelo administrador (`simone@fgvtn.com.br`).
 
-**Firebase SDK**Autenticação no cliente
+---
 
-**Axios**Cliente HTTP
+### Módulo: Veículos Corporativos
 
-## 4\. Estrutura de Pastas
+**Disponível para todos os usuários autenticados**
 
-*   **sistema-reservas/**
-    *   **api/** (Backend)
-        *   index.js (Entry point e definição de rotas)
-        *   calendarService.js (Lógica do Google Calendar)
-        *   mailer.js (Serviço de envio de e-mails com anexos .ics)
-        *   seed.js (Script para popular o banco de dados)
-        *   serviceAccountKey.json (Credenciais de serviço - Sensível)
-        *   package.json
-    *   **client/** (Frontend)
-        *   **src/**
-            *   **components/**
-                *   DailyView.jsx (Visualização de agenda diária)
-                *   LoginScreen.jsx (Tela de login)
-                *   MyBookings.jsx (Lista de reservas do usuário)
-                *   ReservationModal.jsx (Formulário de reserva)
-                *   RoomCard.jsx (Card de sala)
-                *   RoomList.jsx (Grid de salas)
-            *   App.jsx (Componente principal e roteamento)
-            *   api.js (Configuração do Axios)
-            *   firebase-config.js (Configuração do Firebase Client)
-        *   vite.config.js
-        *   tailwind.config.js
+- **Frota** — exibe todos os veículos com foto, modelo, placa, KM atual e status. Veículos com reserva ativa ou em andamento aparecem bloqueados para novos agendamentos.
+- **Reservar Veículo** — informa data/hora de retirada, devolução prevista e destino. O sistema verifica conflitos de período antes de confirmar.
+- **Minhas Viagens** — histórico completo das viagens do usuário (ativas, concluídas e canceladas).
+- **Agenda** — visão diária mostrando quais veículos estão em uso em cada horário.
+- **Devolução** — ao devolver, o usuário informa o KM de retorno e o nível do tanque. O sistema atualiza automaticamente o KM atual no cadastro do veículo.
+- **Regularizar Uso** — registra retroativamente uma saída que ocorreu sem reserva prévia. O registro já nasce com status `concluída`.
 
-## 5\. Instalação e Configuração
+**Painel Suprimentos** — exclusivo para administradores
+
+| Aba | Função |
+|---|---|
+| **Frota** | Cadastrar e editar veículos. Filtrar por categoria (Externos, Diretoria, Reserva). |
+| **Viagens Ativas** | Ver todas as reservas em andamento. Forçar encerramento com senha. |
+| **Histórico** | Consultar todas as viagens concluídas e canceladas com filtros avançados. |
+| **Calendário** | Agenda visual de toda a frota por dia. |
+| **Lançamento de Custos** | Registrar gastos (combustível, manutenção, multa, seguro, etc.) vinculados a um veículo. |
+| **Resumo Financeiro** | Visão consolidada dos custos por veículo e categoria. |
+| **Manutenção** | Histórico de serviços e manutenções preventivas/corretivas. |
+
+**Regras de negócio**
+
+- Não é possível reservar no passado (tolerância de 10 minutos).
+- Não é possível reservar um veículo com reserva ativa no mesmo período.
+- O KM de retorno deve ser igual ou superior ao KM atual registrado no cadastro.
+- Cada reserva recebe um **código único** no formato `VEI-XXXXXX`.
+
+---
+
+## 🔐 Controle de acesso
+
+### Módulo: Salas de Reunião
+
+| Perfil | Permissões |
+|---|---|
+| **Usuário comum** | Visualizar salas, criar reservas públicas, editar/cancelar apenas as próprias reservas |
+| **Admin** (`simone@fgvtn.com.br`) | Tudo acima + reservar Sala Restrita + editar/cancelar reservas de qualquer usuário |
+
+### Módulo: Veículos Corporativos
+
+| Perfil | E-mails | Permissões |
+|---|---|---|
+| **Usuário comum** | Todos os autenticados | Visualizar frota, reservar, devolver, ver suas viagens, regularizar uso |
+| **Admin (Suprimentos)** | `compras@`, `leticia.chaikoski@`, `nadia@`, `gustavo@` — todos `@fgvtn.com.br` | Tudo acima + Painel Suprimentos completo |
+
+---
+
+## 📧 Notificações por e-mail
+
+Todos os e-mails são enviados de `reservas@fgvtn.com.br` via Gmail SMTP.
+
+### Salas de Reunião
+
+| Evento | Destinatários | Tipo de e-mail |
+|---|---|---|
+| Criação de reserva | Organizador + convidados | Convite com arquivo `invite.ics` (método `REQUEST`) |
+| Edição de reserva | Organizador + convidados | Convite atualizado (SEQUENCE incrementada) |
+| Cancelamento | Organizador + convidados | Cancelamento iCal (método `CANCEL`) — remove da agenda |
+
+O arquivo `.ics` permite adicionar ou remover o evento diretamente no Outlook, Google Calendar ou Apple Calendar com um único clique.
+
+### Veículos Corporativos
+
+| Evento | Destinatário | Conteúdo |
+|---|---|---|
+| Confirmação de reserva | Usuário que reservou | Dados da viagem e código `VEI-XXXXXX` |
+| Devolução registrada | Usuário que devolveu | Confirmação com KM e nível de tanque |
+| Lembrete automático (1h antes) | Usuário com reserva ativa | Aviso de prazo se aproximando |
+| Lembrete de atraso (a cada hora) | Usuário com reserva vencida | Aviso de veículo em atraso |
+| Regularização | Usuário registrador | Confirmação do registro retroativo |
+
+---
+
+## ⏰ Robôs automáticos (Cron Jobs)
+
+O backend executa dois processos agendados via `node-cron` que rodam de forma contínua enquanto o servidor está ativo.
+
+**Lembrete de prazo — a cada 15 minutos**
+Verifica reservas com `status = "ativa"` e `reminderSent = false`. Se o prazo de devolução estiver a menos de 1 hora, envia o e-mail de lembrete e marca `reminderSent = true` para não enviar novamente.
+
+**Lembrete de atraso — a cada hora**
+Verifica reservas `"ativa"` ou `"em_uso"` cujo prazo já expirou. Se o último lembrete de atraso foi enviado há mais de 55 minutos, envia novo e-mail e atualiza `lastOverdueReminder` com o timestamp atual.
+
+---
+
+## 🚀 Setup local
 
 ### Pré-requisitos
+- Node.js v18+
+- Projeto Firebase com Firestore e Authentication (provedor Google) habilitados
+- Google Cloud Platform com a Calendar API habilitada
+- Conta Gmail com *App Password* configurada para envio SMTP
 
-*   Node.js (v18 ou superior)
-*   Conta no Firebase (Firestore e Authentication habilitados)
-*   Conta no Google Cloud Platform (Google Calendar API habilitada)
-*   Conta de E-mail para envio SMTP (Ex: Gmail com App Password)
+### Backend
 
-### Passo 1: Configuração do Backend (API)
-
-1.  Navegue até a pasta `api` e instale as dependências:
-    
-    ```
-    cd api
-    npm install
-    ```
-    
-2.  Adicione o arquivo `serviceAccountKey.json` do Firebase na raiz da pasta `api`.
-3.  Configure o arquivo `mailer.js` com suas credenciais SMTP.
-
-### Passo 2: Configuração do Frontend (Client)
-
-1.  Navegue até a pasta `client` e instale as dependências:
-    
-    ```
-    cd client
-    npm install
-    ```
-    
-2.  Configure o arquivo `firebase-config.js` com as chaves públicas do seu projeto Firebase.
-
-### Executando o Projeto
-
-Inicie o backend e o frontend em terminais separados:
-
-**Terminal 1 (API):**
-
-```
+```bash
 cd api
+npm install
+# Adicione o arquivo serviceAccountKey.json (credencial Firebase) na pasta api/
 npm run dev
-# Roda em http://10.40.125.2:4411 (configure PORT=4411 no .env)
+# Servidor: http://10.40.125.2:4411
 ```
 
-**Terminal 2 (Client):**
+### Frontend
 
-```
+```bash
 cd client
+npm install
+# Configure src/firebase-config.js com as chaves do seu projeto Firebase
 npm run dev
-# Roda em http://localhost:5173
+# Aplicação: http://localhost:5173
 ```
 
-## 6\. API Endpoints
+Para produção, gere o build estático e sirva com qualquer servidor HTTP:
 
-A API RESTful expõe os seguintes recursos para gerenciamento de salas e reservas.
-
-| Método | Endpoint | Descrição | Parâmetros Necessários |
-| --- | --- | --- | --- |
-| GET | `/rooms` | Lista todas as salas cadastradas | \-  |
-| POST | `/bookings` | Cria uma nova reserva | `roomId`, `date`, `startTime`, `endTime`, `userEmail` |
-| GET | `/bookings/search` | Busca reservas filtradas | Query params: `date` (obrigatório), `roomId` |
-| PUT | `/bookings/:id` | Atualiza uma reserva existente | `id` na URL, corpo JSON com novos dados |
-| DELETE | `/bookings/:id` | Cancela uma reserva | `userEmail` no corpo (para validação de permissão) |
-| GET | `/my-bookings` | Lista reservas de um usuário | Query param: `userEmail` |
-
-## 7\. Estrutura de Dados (Firestore)
-
-### Coleção: `rooms`
-
-Armazena as informações das salas de reunião.
-
-```
-{
-  "id": "string (auto-generated)",
-  "nome": "Sala de Reunião Administrativo",
-  "capacidade": 8,
-  "localizacao": "Administrativo",
-  "equipamentos": ["TV", "Ar Condicionado", "Web Cam"]
-}
+```bash
+cd client
+npm run build   # gera a pasta dist/
 ```
 
-### Coleção: `bookings`
+---
 
-Armazena as reservas efetuadas.
+## 🔥 Firebase
 
-```
-{
-  "id": "string (auto-generated)",
-  "roomId": "string (referência à sala)",
-  "roomName": "string",
-  "userEmail": "[email protected]",
-  "date": "YYYY-MM-DD",
-  "startTime": "HH:MM",
-  "endTime": "HH:MM",
-  "title": "Reunião de Projeto",
-  "attendees": "[email protected], [email protected]",
-  "createdAt": "ISOString"
-}
-```
+### Coleções do Firestore
 
-## 8\. Componentes React Principais
+| Coleção | Descrição |
+|---|---|
+| `rooms` | Salas de reunião cadastradas (nome, capacidade, localização, equipamentos) |
+| `bookings` | Reservas de sala (data, horário, organizador, convidados, status RSVP) |
+| `cars` | Veículos cadastrados (modelo, placa, categoria, KM atual) |
+| `car_bookings` | Reservas de veículo (período, destino, status, KM, código `VEI-`) |
+| `car_costs` | Custos registrados por veículo (combustível, manutenção, multa, etc.) |
 
-### App.jsx
+### Credenciais necessárias
 
-Gerenciador de estado global. Controla a autenticação do usuário, o modo de visualização (Cards, Agenda, Minhas Reservas) e o estado do modal de reserva.
+| Arquivo / Variável | Onde usar | O que contém |
+|---|---|---|
+| `api/serviceAccountKey.json` | Backend | Chave de serviço do Firebase Admin (não versionar no git) |
+| `client/src/firebase-config.js` | Frontend | Chaves públicas do Firebase Client SDK |
+| `api/mailer.js` | Backend | Usuário e App Password do Gmail SMTP |
 
-### DailyView.jsx
+---
 
-Implementa uma visualização de "Agenda do Dia". Mostra uma linha do tempo vertical ou tabela onde é possível ver visualmente os blocos de horário ocupados para cada sala.
+## 📦 API — Referência de endpoints
 
-### ReservationModal.jsx
+### Salas
 
-Componente complexo responsável pelo formulário de criação e edição de reservas. Realiza validações de formulário antes de enviar os dados para a API.
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/rooms` | Lista todas as salas |
+| `POST` | `/bookings` | Cria nova reserva de sala |
+| `GET` | `/bookings/search` | Busca reservas por `date` (e opcionalmente `roomId`) |
+| `GET` | `/bookings/room-month` | Reservas de uma sala no mês (`roomId`, `month=YYYY-MM`) |
+| `GET` | `/bookings/my` | Reservas e convites do usuário (`email`) |
+| `PUT` | `/bookings/:id` | Edita reserva |
+| `PUT` | `/bookings/:id/rsvp` | Responde convite (`aceito`, `recusado`, `pendente`) |
+| `DELETE` | `/bookings/:id` | Cancela reserva |
 
-### LoginScreen.jsx
+### Veículos
 
-Interface de login que utiliza o Firebase Auth para autenticação via Google Provider.
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/cars` | Lista todos os veículos |
+| `POST` | `/cars` | Cadastra novo veículo |
+| `PUT` | `/cars/:id` | Edita veículo |
+| `GET` | `/cars/:id/history` | Histórico de viagens de um veículo |
+| `POST` | `/car-bookings` | Cria reserva de veículo |
+| `POST` | `/car-bookings/regularizada` | Cria reserva retroativa (status `concluída`) |
+| `GET` | `/car-bookings/search` | Reservas ativas de um veículo (`carId`) |
+| `GET` | `/car_bookings/my` | Viagens do usuário (`email`) |
+| `GET` | `/car_bookings/active` | Todas as viagens ativas |
+| `GET` | `/car_bookings/finalizados` | Viagens concluídas e canceladas |
+| `GET` | `/car_bookings/by-date` | Frota toda em uma data específica |
+| `GET` | `/car_bookings/car-month` | Reservas de um veículo no mês (`carId`, `month=YYYY-MM`) |
+| `PUT` | `/car_bookings/:id/return` | Registra devolução (KM + nível de tanque) |
+| `POST` | `/car_bookings/:id/admin-finalize` | Admin força encerramento (requer senha) |
+| `DELETE` | `/car_bookings/:id` | Cancela reserva de veículo |
+| `GET` | `/car_costs` | Lista todos os custos |
+| `POST` | `/car_costs` | Registra novo custo |
+| `PUT` | `/car_costs/:id` | Edita custo |
+| `DELETE` | `/car_costs/:id` | Exclui custo |
 
-## 9\. Funcionalidades Detalhadas
+---
 
-### 📧 Notificações Inteligentes
+## 📝 Convenções
 
-O sistema utiliza o **Nodemailer** em conjunto com **ical-generator** para enviar e-mails profissionais.
+- Strings de UI e comentários em **português brasileiro**.
+- O arquivo `serviceAccountKey.json` **nunca deve ser commitado** no git — está no `.gitignore`.
+- A variável `ADMIN_FINALIZE_PASSWORD` no `api/index.js` é a senha usada pelo Painel Suprimentos para forçar o encerramento de reservas.
+- Ao adicionar novos endpoints de veículos, atentar para a inconsistência histórica de prefixos: rotas de criação usam `/car-bookings` (com hífen) e rotas de ação usam `/car_bookings` (com underscore).
 
-*   **Convite (.ics):** Ao criar uma reserva, um e-mail é enviado ao organizador e aos convidados com um arquivo `invite.ics` anexo, permitindo adicionar o evento ao Outlook/Gmail com um clique.
-*   **Cancelamento:** Ao cancelar, um e-mail com método `CANCEL` é disparado, removendo o evento da agenda dos participantes automaticamente.
-*   **Atualização:** Edições disparam e-mails com `SEQUENCE` incrementada, atualizando os detalhes na agenda dos convidados.
+---
 
-### 📅 Sincronização Google Calendar
+## 📧 Contato
 
-Além dos convites por e-mail, o sistema usa a **Google Calendar API** através de uma Service Account para criar um "bloqueio" numa agenda centralizada (`[[email protected]](/cdn-cgi/l/email-protection)`), garantindo visibilidade corporativa.
+Dúvidas ou problemas: **gustavo@fgvtn.com.br**
 
-### 🛡️ Validações de Regra de Negócio
+---
 
-*   **Anti-Conflito:** O backend verifica no banco se já existe reserva no intervalo de tempo solicitado (Overlap check).
-*   **Bloqueio de Passado:** Não é permitido agendar horários anteriores ao momento atual (com tolerância de 10 min).
-*   **Horário Invertido:** Valida se o horário final é maior que o inicial.
-
-## 10\. Segurança e Permissões
-
-O sistema implementa um controle de acesso baseado em papéis (RBAC) simplificado:
-
-*   **Usuário Comum:** Pode visualizar todas as salas, criar reservas em salas públicas, editar/cancelar _apenas suas próprias_ reservas.
-*   **Administrador (Admin):** Identificado pelo email `[[email protected]](/cdn-cgi/l/email-protection)`.
-    *   Pode reservar a **Sala Restrita** (ID: `BXkxGTCaPe37qS9ZuVvp`).
-    *   Pode editar ou cancelar reservas de **qualquer usuário**.
-
-## 11\. Integrações Externas
-
-| Serviço | Propósito | Configuração Chave |
-| --- | --- | --- |
-| **Firebase Auth** | Identidade e Login | Provedor Google habilitado no console Firebase |
-| **Google Calendar** | Calendário Central | Service Account com permissão de escrita no calendário |
-| **Gmail SMTP** | Disparo de E-mails | App Password gerada na conta Google |
-
-Documentação gerada automaticamente para o repositório **sistema-reservas** | © 2026
+*Portal Corporativo de Reservas FGV · v2.0 · © 2026*
