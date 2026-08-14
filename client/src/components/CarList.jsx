@@ -10,9 +10,9 @@ import {
   Settings2
 } from 'lucide-react';
 
-export default function CarList({ cars, onReserve }) {
+export default function CarList({ cars, blockedCarIds = new Set(), onReserve }) {
   const availableCars = (Array.isArray(cars) ? cars : []).filter(
-    (car) => car.categoria === 'Reserva'
+    (car) => car.categoria === 'Reserva' && !car.bloqueado
   );
 
   if (availableCars.length === 0) {
@@ -30,13 +30,13 @@ export default function CarList({ cars, onReserve }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 animate-fade-in-up">
       {availableCars.map((car) => (
-        <CarCard key={car.id} car={car} onReserve={onReserve} />
+        <CarCard key={car.id} car={car} isBlocked={blockedCarIds.has(car.id)} onReserve={onReserve} />
       ))}
     </div>
   );
 }
 
-function CarCard({ car, onReserve }) {
+function CarCard({ car, isBlocked, onReserve }) {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
 
   const images = Array.isArray(car.imagens) ? [...car.imagens] : [];
@@ -118,6 +118,15 @@ function CarCard({ car, onReserve }) {
           <Users size={14} className="text-[#0c6192]" />
           {car.capacidade || 5} Pessoas
         </div>
+
+        {isBlocked && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+            <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg">
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse inline-block"></span>
+              Em uso
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-5 flex flex-col flex-grow">
@@ -155,11 +164,16 @@ function CarCard({ car, onReserve }) {
         </div>
 
         <div className="mt-auto">
+          {isBlocked && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2 text-center font-medium">
+              Veículo em uso no momento. Você pode reservá-lo para um período futuro.
+            </p>
+          )}
           <button
             onClick={() => onReserve(car)}
             className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-200 bg-[#0c6192] text-white hover:bg-[#0a4b70] shadow-lg shadow-[#0c6192]/30 active:scale-95"
           >
-            Reservar Veículo
+            {isBlocked ? 'Reservar para depois' : 'Reservar Veículo'}
             <CalendarCheck size={16} />
           </button>
         </div>

@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 export default function CarReturnModal({ booking, onClose, onSuccess }) {
   const [formData, setFormData] = useState({
     kmRetorno: '',
-    nivelTanque: 'Cheio',
+    nivelTanque: '',
     abasteceu: false,
   });
   
@@ -21,6 +21,7 @@ export default function CarReturnModal({ booking, onClose, onSuccess }) {
     e.preventDefault();
     
     if (!formData.kmRetorno) return toast.error("Informe a KM de retorno.");
+    if (!formData.nivelTanque) return toast.error("Informe o nível do tanque.");
 
     setLoading(true);
     const promise = api.post(`/car-bookings/${booking.id}/return`, formData);
@@ -65,7 +66,8 @@ export default function CarReturnModal({ booking, onClose, onSuccess }) {
             
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5"><Droplet size={16} className="text-[#0c6192]"/> Nível do Tanque</label>
-              <select name="nivelTanque" value={formData.nivelTanque} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0c6192]/20 focus:border-[#0c6192] outline-none bg-white" onChange={handleChange}>
+              <select name="nivelTanque" value={formData.nivelTanque} required className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0c6192]/20 focus:border-[#0c6192] outline-none bg-white" onChange={handleChange}>
+                <option value="" disabled>Selecione...</option>
                 <option value="Cheio">Cheio</option>
                 <option value="3/4">3/4</option>
                 <option value="Meio">Meio</option>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import { Clock, ChevronLeft, ChevronRight, Edit3, Calendar } from 'lucide-react';
+import { ROOM_ADMIN_EMAIL } from '../config';
 
 export default function DailyView({ rooms, onReserve, onEditBooking, currentUserEmail }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
@@ -8,8 +9,7 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const ADMIN_EMAIL = 'simone@fgvtn.com.br';
-  const isAdmin = currentUserEmail === ADMIN_EMAIL;
+  const isAdmin = currentUserEmail === ROOM_ADMIN_EMAIL;
 
   const timeSlots = Array.from({ length: 11 }, (_, i) => {
     const hour = i + 8;

@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, Mail, MapPin, AlertCircle, CarFront } from 'lucide-react';
-import api from '../api'; 
+import { X, Calendar, Clock, Mail, MapPin, AlertCircle, CarFront, Fuel } from 'lucide-react';
+import api from '../api';
 import toast from 'react-hot-toast';
 
-export default function CarReservationModal({ car, onClose, onSuccess, currentUserEmail }) {
+export default function CarReservationModal({ car, onClose, onSuccess, currentUserEmail, editingBooking }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [formData, setFormData] = useState({
-    startDate: new Date().toISOString().split('T')[0],
-    startTime: '08:00',
-    endDate: new Date().toISOString().split('T')[0],
-    endTime: '18:00',
-    userEmail: currentUserEmail || '',
-    destino: ''
+    startDate: editingBooking?.startDate || new Date().toISOString().split('T')[0],
+    startTime: editingBooking?.startTime || '08:00',
+    endDate: editingBooking?.endDate || new Date().toISOString().split('T')[0],
+    endTime: editingBooking?.endTime || '18:00',
+    userEmail: editingBooking?.userEmail || currentUserEmail || '',
+    destino: editingBooking?.destino && editingBooking.destino !== 'Não informado' ? editingBooking.destino : ''
   });
-  
-  const [busySlots, setBusySlots] = useState([]); 
+
+  const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -28,12 +28,23 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
       const response = await api.get('/car-bookings/search', {
         params: { carId: car.id }
       });
-      setBusySlots(ensureArray(response.data));
+      const bookings = ensureArray(response.data);
+      // Ao editar, não mostra a própria reserva como conflito na agenda
+      const slots = editingBooking
+        ? bookings.filter(b => b.id !== editingBooking.id)
+        : bookings;
+      setBusySlots(slots);
     } catch (err) {
       console.error("Erro ao buscar agenda:", err);
     } finally {
       setLoadingSlots(false);
     }
+  };
+
+  const formatNivelData = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
 
   const handleChange = (e) => {
@@ -44,11 +55,13 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
     e.preventDefault();
     setLoading(true);
 
-    const promise = api.post('/car-bookings', { 
-        carId: car.id, 
-        carModel: car.modelo, 
-        ...formData 
-    });
+    const promise = editingBooking
+      ? api.put(`/car_bookings/${editingBooking.id}`, { ...formData })
+      : api.post('/car-bookings', {
+          carId: car.id,
+          carModel: car.modelo,
+          ...formData
+        });
 
     toast.promise(
        promise,
@@ -57,7 +70,7 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
          success: () => {
              onSuccess();
              onClose();
-             return 'Veículo reservado com sucesso!';
+             return editingBooking ? 'Reserva atualizada com sucesso!' : 'Veículo reservado com sucesso!';
          },
          error: (err) => err.response?.data?.error || "Ocorreu um erro ao salvar.",
        }
@@ -76,7 +89,7 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
           <div className="flex justify-between items-center mb-6">
             <div>
                 <h3 className="font-bold text-2xl text-gray-800 flex items-center gap-2">
-                  <CarFront className="text-[#0c6192]" /> Reservar Veículo
+                  <CarFront className="text-[#0c6192]" /> {editingBooking ? 'Editar Reserva' : 'Reservar Veículo'}
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">{car.modelo} - Placa: {car.placa}</p>
             </div>
@@ -85,8 +98,26 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
             </button>
           </div>
 
+          {/* ÚLTIMO NÍVEL DE COMBUSTÍVEL REGISTRADO */}
+          <div className="mb-5 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <Fuel size={20} className="text-amber-600 mt-0.5 shrink-0" />
+            <div className="text-sm">
+              <p className="font-semibold text-amber-800">Último nível de combustível registrado</p>
+              {car.ultimoNivelTanque ? (
+                <p className="text-amber-700">
+                  <b>{car.ultimoNivelTanque}</b>
+                  {car.ultimoNivelTanqueData && (
+                    <span className="text-xs text-amber-600"> — em {formatNivelData(car.ultimoNivelTanqueData)}</span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-xs text-amber-700">Nenhum registro de devolução com nível de tanque ainda.</p>
+              )}
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-5">
-            
+
             {/* RETIRADA */}
             <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
                 <label className="block text-sm font-bold text-gray-700 mb-2">Retirada (Início)</label>
@@ -138,7 +169,7 @@ export default function CarReservationModal({ car, onClose, onSuccess, currentUs
             {/* BOTÕES DE AÇÃO */}
             <div className="pt-2 flex gap-3">
               <button type="submit" disabled={loading} className={`flex-1 py-3 rounded-xl font-bold text-white transition-all shadow-md ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#0c6192] hover:bg-[#0a4b70] shadow-[#0c6192]/30'}`}>
-                {loading ? 'Processando...' : 'Confirmar Reserva'}
+                {loading ? 'Processando...' : (editingBooking ? 'Salvar Alterações' : 'Confirmar Reserva')}
               </button>
               <button type="button" onClick={onClose} className="px-6 py-3 border border-gray-300 rounded-xl text-gray-600 hover:bg-gray-50 font-medium transition-colors">Cancelar</button>
             </div>

@@ -2,13 +2,17 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
+// Estas chaves são públicas por design no Firebase Web SDK — a proteção real
+// vem das Firestore Security Rules e da lista de domínios autorizados no
+// Firebase Console. Ainda assim ficam em client/.env para não expor os
+// identificadores do projeto no repositório público.
 const firebaseConfig = {
-  apiKey: "***REMOVIDO***",
-  authDomain: "sistema-reserva-salas-77c75.firebaseapp.com",
-  projectId: "sistema-reserva-salas-77c75",
-  storageBucket: "sistema-reserva-salas-77c75.firebasestorage.app",
-  messagingSenderId: "517086462153",
-  appId: "1:517086462153:web:5bbc1f2a5bec8ca5044d18"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);

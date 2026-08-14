@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Calendar, MapPin, CheckCircle, Gauge, Fuel, X, Trash2, CarFront } from 'lucide-react';
+import { Calendar, MapPin, CheckCircle, Gauge, Fuel, X, Trash2, CarFront, Copy, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
+import CarReservationModal from './CarReservationModal';
 
 export default function MyCarBookings({ userEmail }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
   const [bookings, setBookings] = useState([]);
   const [cars, setCars] = useState([]); // Agora baixamos os carros também
   const [loading, setLoading] = useState(true);
-  
+
+  const [editingBooking, setEditingBooking] = useState(null);
   const [returnModal, setReturnModal] = useState(null);
   const [kmRetorno, setKmRetorno] = useState('');
-  const [nivelTanque, setNivelTanque] = useState('Cheio');
+  const [nivelTanque, setNivelTanque] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -63,6 +65,7 @@ export default function MyCarBookings({ userEmail }) {
   const handleReturn = async (e) => {
     e.preventDefault();
     if (!kmRetorno) return toast.error("Informe a quilometragem final.");
+    if (!nivelTanque) return toast.error("Selecione o nível do tanque.");
 
     const promise = api.put(`/car_bookings/${returnModal.id}/return`, {
       kmRetorno,
@@ -76,11 +79,18 @@ export default function MyCarBookings({ userEmail }) {
         fetchData();
         setReturnModal(null);
         setKmRetorno('');
-        setNivelTanque('Cheio');
+        setNivelTanque('');
         return 'Veículo devolvido com sucesso!';
       },
       error: (err) => err.response?.data?.error || 'Erro ao devolver veículo.' // Agora o Toast mostra a mensagem exata do erro de KM!
     });
+  };
+
+  const copyDocId = (id) => {
+    navigator.clipboard.writeText(id).then(
+      () => toast.success('ID do documento copiado!'),
+      () => toast.error('Não foi possível copiar.')
+    );
   };
 
   const formatDate = (dateStr) => {
@@ -141,11 +151,34 @@ export default function MyCarBookings({ userEmail }) {
                         <span><strong>Destino:</strong> {booking.destino}</span>
                       </div>
                     )}
+                    <div className="flex items-center gap-3 text-sm text-gray-600">
+                      <Fuel size={18} className="text-amber-500"/>
+                      <span>
+                        <strong>Último combustível:</strong>{' '}
+                        {car.ultimoNivelTanque
+                          ? <span className="font-semibold text-amber-700">{car.ultimoNivelTanque}</span>
+                          : <span className="text-gray-400">Sem registro</span>}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 mt-2">
+                      <span className="font-bold uppercase tracking-wider text-[10px]">ID Firestore:</span>
+                      <code className="font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-700 break-all">{booking.id}</code>
+                      <button
+                        onClick={() => copyDocId(booking.id)}
+                        title="Copiar ID"
+                        className="p-1 text-gray-400 hover:text-[#0c6192] hover:bg-blue-50 rounded transition-colors shrink-0"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="p-4 bg-gray-50 border-t border-gray-100 flex gap-3">
                     <button onClick={() => setReturnModal(booking)} className="flex-1 bg-[#0c6192] hover:bg-[#0a4b70] text-white py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95">
                       <CheckCircle size={18} /> Devolver
+                    </button>
+                    <button onClick={() => setEditingBooking({ booking, car })} className="px-4 py-2.5 bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 rounded-lg font-bold text-sm flex items-center justify-center transition-colors" title="Editar reserva">
+                      <Pencil size={18} />
                     </button>
                     <button onClick={() => handleCancel(booking.id)} className="px-4 py-2.5 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg font-bold text-sm flex items-center justify-center transition-colors">
                       <Trash2 size={18} />
@@ -183,6 +216,17 @@ export default function MyCarBookings({ userEmail }) {
                        <p className="text-xs text-gray-500">
                          {formatDate(booking.startDate)} {booking.startTime} até {formatDate(booking.endDate)} {booking.endTime}
                        </p>
+                       <div className="flex items-center gap-1.5 mt-1.5">
+                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">ID:</span>
+                         <code className="font-mono text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 break-all">{booking.id}</code>
+                         <button
+                           onClick={() => copyDocId(booking.id)}
+                           title="Copiar ID"
+                           className="p-0.5 text-gray-400 hover:text-[#0c6192] rounded transition-colors"
+                         >
+                           <Copy size={11} />
+                         </button>
+                       </div>
                      </div>
                   </div>
                   
@@ -204,6 +248,17 @@ export default function MyCarBookings({ userEmail }) {
             })}
           </div>
         </div>
+      )}
+
+      {/* === MODAL DE EDIÇÃO DE RESERVA === */}
+      {editingBooking && (
+        <CarReservationModal
+          car={editingBooking.car}
+          currentUserEmail={userEmail}
+          editingBooking={editingBooking.booking}
+          onClose={() => setEditingBooking(null)}
+          onSuccess={() => { setEditingBooking(null); fetchData(); }}
+        />
       )}
 
       {/* === MODAL DE DEVOLUÇÃO === */}
@@ -242,7 +297,8 @@ export default function MyCarBookings({ userEmail }) {
                 <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                    <Fuel size={18} className="text-[#0c6192]"/> Nível do Tanque
                 </label>
-                <select value={nivelTanque} onChange={(e) => setNivelTanque(e.target.value)} className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#0c6192] font-medium">
+                <select required value={nivelTanque} onChange={(e) => setNivelTanque(e.target.value)} className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-[#0c6192] font-medium">
+                  <option value="" disabled>Selecione o nível...</option>
                   <option value="Cheio">Cheio (100%)</option>
                   <option value="3/4">3/4 (75%)</option>
                   <option value="Meio Tanque">Meio Tanque (50%)</option>

@@ -8,13 +8,17 @@ import { Toaster } from 'react-hot-toast';
 import RoomList from './components/RoomList'
 import ReservationModal from './components/ReservationModal'
 import DailyView from './components/DailyView'
+import RoomMonthView from './components/RoomMonthView'
 import LoginScreen from './components/LoginScreen'
-import MyBookings from './components/MyBookings' 
+import MyBookings from './components/MyBookings'
 import CarSystem from './components/CarSystem'
+import AdminRoomPanel from './components/AdminRoomPanel'
 
 // Novos Componentes
 import HubSelection from './components/HubSelection'
-import { Calendar, LayoutGrid, CalendarDays, LogOut, List, ArrowLeft } from 'lucide-react'
+import { Calendar, LayoutGrid, CalendarDays, LogOut, List, ArrowLeft, CalendarRange, Shield } from 'lucide-react'
+
+import { ROOM_PANEL_ADMIN_EMAIL } from './config'
 
 function App() {
   const ensureArray = (value) => Array.isArray(value) ? value : []
@@ -133,9 +137,17 @@ function App() {
               <button onClick={() => setViewMode('agenda')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'agenda' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
                 <CalendarDays size={18} /> <span className="hidden md:inline">Agenda Geral</span>
               </button>
+              <button onClick={() => setViewMode('month')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'month' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                <CalendarRange size={18} /> <span className="hidden md:inline">Visão Mensal</span>
+              </button>
               <button onClick={() => setViewMode('my_bookings')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'my_bookings' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
                 <List size={18} /> <span className="hidden md:inline">Minhas Reservas</span>
               </button>
+              {user.email === ROOM_PANEL_ADMIN_EMAIL && (
+                <button onClick={() => setViewMode('admin')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'admin' ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <Shield size={18} /> <span className="hidden md:inline">Admin</span>
+                </button>
+              )}
             </div>
 
             <div className="flex items-center gap-3 border-l pl-4 border-gray-200">
@@ -154,9 +166,13 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-8">
             <>
-              {viewMode === 'cards' && <RoomList rooms={rooms} onReserve={handleOpenModal} currentUserEmail={user.email} />}
-              {viewMode === 'agenda' && <div className="animate-fade-in-up"><DailyView rooms={rooms} onReserve={handleOpenModal} onEditBooking={handleEditBooking} currentUserEmail={user.email} /></div>}
-              {viewMode === 'my_bookings' && <MyBookings userEmail={user.email} onEdit={handleEditBooking} />}
+              {viewMode === 'cards'      && <RoomList rooms={rooms} onReserve={handleOpenModal} currentUserEmail={user.email} />}
+              {viewMode === 'agenda'     && <div className="animate-fade-in-up"><DailyView rooms={rooms} onReserve={handleOpenModal} onEditBooking={handleEditBooking} currentUserEmail={user.email} /></div>}
+              {viewMode === 'month'      && <RoomMonthView rooms={rooms} />}
+              {viewMode === 'my_bookings'&& <MyBookings userEmail={user.email} onEdit={handleEditBooking} />}
+              {viewMode === 'admin' && user.email === ROOM_PANEL_ADMIN_EMAIL && (
+                <AdminRoomPanel currentUserEmail={user.email} rooms={rooms} />
+              )}
             </>
       </main>
 

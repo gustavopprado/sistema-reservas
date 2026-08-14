@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
 import { Users, MapPin, ChevronLeft, ChevronRight, Lock, CalendarCheck } from 'lucide-react';
+import {
+  ROOM_ADMIN_EMAIL,
+  RESTRICTED_ROOM_EMAILS,
+  RESTRICTED_ROOM_ID,
+  SALAO_ROOM_ID,
+} from '../config';
 
 export default function RoomCard({ room, onReserve, currentUserEmail }) {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
@@ -9,20 +15,15 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
       images.push(room.foto || room.image);
   }
 
-  // --- IDs DE CONFIGURAÇÃO ---
-  const ID_SIMONE = 'BXkxGTCaPe37qS9ZuVvp';
-  const ADMIN_EMAIL = 'simone@fgvtn.com.br';
-  
-  // ATUALIZADO: Novo ID do Salão
-  const ID_SALAO  = 'j7QOhdPRzEJcza2cMqwM'; 
-
+  // --- IDs DE CONFIGURAÇÃO (ver client/.env.example) ---
   // Verifica usuário e sala
-  const isAdmin = currentUserEmail === ADMIN_EMAIL;
-  const isRestrictedRoom = room.id === ID_SIMONE;
-  const isSalao = room.id === ID_SALAO; // Verifica se é o salão
-  
+  const isAdmin = currentUserEmail === ROOM_ADMIN_EMAIL;
+  const canBookRestricted = RESTRICTED_ROOM_EMAILS.includes(currentUserEmail);
+  const isRestrictedRoom = room.id === RESTRICTED_ROOM_ID;
+  const isSalao = room.id === SALAO_ROOM_ID; // Verifica se é o salão
+
   // Bloqueio
-  const isLocked = isRestrictedRoom && !isAdmin;
+  const isLocked = isRestrictedRoom && !canBookRestricted;
 
   const nextImage = (e) => {
     e.stopPropagation();
@@ -38,6 +39,7 @@ export default function RoomCard({ room, onReserve, currentUserEmail }) {
   const getButtonText = () => {
     if (isRestrictedRoom) {
         if (isAdmin) return "Reservar (Modo Admin)";
+        if (canBookRestricted) return "Reservar Sala";
         return "Reservas apenas com a Simone";
     }
     if (isSalao) return "Reservar Salão"; // Texto específico para o Salão

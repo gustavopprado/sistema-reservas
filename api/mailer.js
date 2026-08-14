@@ -1,160 +1,88 @@
 const nodemailer = require('nodemailer');
-const ical = require('ical-generator').default; // Importante o .default em algumas versões
+const config = require('./config');
+
+// Remetentes montados a partir da configuração — ver api/.env.example.
+const FROM_ROOMS = `"${config.mail.fromNameRooms}" <${config.mail.user}>`;
+const FROM_FLEET = `"${config.mail.fromNameFleet}" <${config.mail.user}>`;
 
 async function createTransporter() {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: 'reservas@fgvtn.com.br', // <--- SEU EMAIL
-      pass: '***SEGREDO-REMOVIDO***'     // <--- SUA SENHA DE APP
+      user: config.mail.user,
+      pass: config.mail.appPassword
     },
   });
 
   return { transporter };
 }
 
-// ... dentro de api/mailer.js
-
-async function sendInviteEmail(bookingData, attendeesList) {
+// E-mail de confirmação enviado APENAS ao organizador da reserva.
+// O convite que adiciona o evento na agenda dos convidados é enviado
+// automaticamente pelo Google (via Google Calendar API), não aqui.
+async function sendBookingConfirmationEmail(bookingData) {
   const { transporter } = await createTransporter();
 
-  // GARANTE QUE O TÍTULO APAREÇA, OU USA O PADRÃO
-  const displayTitle = bookingData.title || 'Reunião'; 
+  const displayTitle = bookingData.title || 'Reunião';
+  const dataFmt = bookingData.date.split('-').reverse().join('/');
 
-  const calendar = ical({ name: 'Convite de Reunião' });
-  calendar.createEvent({
-    start: new Date(`${bookingData.date}T${bookingData.startTime}:00`),
-    end: new Date(`${bookingData.date}T${bookingData.endTime}:00`),
-    summary: displayTitle, // <--- AQUI
-    description: `Reserva de sala confirmada.\nOrganizador: ${bookingData.userEmail}`,
-    location: bookingData.roomName,
-    organizer: { name: 'Sistema Reservas', email: bookingData.userEmail }
-  });
+  const convidados = Array.isArray(bookingData.convidados) && bookingData.convidados.length > 0
+    ? bookingData.convidados.join(', ')
+    : 'Nenhum';
+
+  const notasBloco = bookingData.notes && bookingData.notes.trim().length > 0
+    ? `<p style="margin-bottom:4px;"><strong>Anotações / Pauta:</strong></p>
+       <p style="white-space: pre-wrap; background:#f8fafc; border:1px solid #e2e8f0; padding:10px; border-radius:6px; color:#334155;">${bookingData.notes}</p>`
+    : '';
+
+  const linkBloco = bookingData.googleEventLink
+    ? `<p style="margin-top:16px;"><a href="${bookingData.googleEventLink}" style="background-color:#2563eb; color:white; padding:10px 20px; text-decoration:none; border-radius:6px; font-weight:bold; display:inline-block;">Ver na Google Agenda</a></p>`
+    : '';
 
   try {
     await transporter.sendMail({
-      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
-      to: attendeesList,
-      // TÍTULO NO ASSUNTO
-      subject: `CONVITE: ${displayTitle} - ${bookingData.date.split('-').reverse().join('/')} às ${bookingData.startTime}`,
-      // TÍTULO NO CORPO DO EMAIL
+      from: FROM_ROOMS,
+      to: bookingData.userEmail,
+      subject: `Reserva confirmada: ${displayTitle} - ${dataFmt} às ${bookingData.startTime}`,
       html: `
-        <div style="font-family: Arial, sans-serif; color: #333;">
-          <h2 style="color: #2563eb;">Você foi convidado: ${displayTitle}</h2>
+        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+          <h2 style="color: #2563eb;">Reserva confirmada</h2>
+          <p>Sua reserva foi criada com sucesso. Os convidados foram notificados pela Google Agenda e o evento já aparece na agenda deles.</p>
+          <p><strong>Título:</strong> ${displayTitle}</p>
           <p><strong>Sala:</strong> ${bookingData.roomName}</p>
-          <p><strong>Data:</strong> ${bookingData.date.split('-').reverse().join('/')}</p>
+          <p><strong>Data:</strong> ${dataFmt}</p>
           <p><strong>Horário:</strong> ${bookingData.startTime} - ${bookingData.endTime}</p>
-          <p><strong>Organizador:</strong> ${bookingData.userEmail}</p>
-          <hr/>
-          <p style="font-size: 12px; color: #666;">Verifique o anexo para adicionar à sua agenda.</p>
+          <p><strong>Convidados:</strong> ${convidados}</p>
+          ${notasBloco}
+          ${linkBloco}
         </div>
-      `,
-      icalEvent: {
-        filename: 'invite.ics',
-        method: 'request',
-        content: calendar.toString()
-      }
+      `
     });
-    console.log("📨 E-mail de convite enviado.");
+    console.log("📨 E-mail de confirmação enviado ao organizador.");
   } catch (error) {
-    console.error("❌ Erro ao enviar convite:", error);
-  }
-}
-
-async function sendCancellationEmail(bookingData, attendeesList) {
-  if (!attendeesList || attendeesList.length === 0) return;
-
-  const { transporter } = await createTransporter();
-
-  // Cria o evento iCal configurado como CANCELAMENTO
-  const calendar = ical({ name: 'Cancelamento de Reserva' });
-  
-  calendar.createEvent({
-    start: new Date(`${bookingData.date}T${bookingData.startTime}:00`),
-    end: new Date(`${bookingData.date}T${bookingData.endTime}:00`),
-    summary: `CANCELADO: ${bookingData.roomName}`,
-    description: `Esta reunião foi cancelada pelo organizador.`,
-    location: bookingData.roomName,
-    organizer: {
-      name: 'Sistema de Reservas',
-      email: bookingData.userEmail
-    },
-    // O Pulo do Gato para cancelamento:
-    status: 'cancelled',
-    sequence: 1 // Indica que é uma atualização de um evento anterior
-  });
-
-  try {
-    await transporter.sendMail({
-      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
-      to: attendeesList,
-      subject: `CANCELADO: ${bookingData.roomName} - ${bookingData.date.split('-').reverse().join('/')}`,
-      text: `A reunião na ${bookingData.roomName} foi cancelada.`,
-      icalEvent: {
-        filename: 'cancellation.ics',
-        method: 'cancel', // Importante: método CANCEL remove da agenda
-        content: calendar.toString()
-      }
-    });
-    console.log("🗑️ E-mail de cancelamento enviado.");
-  } catch (error) {
-    console.error("❌ Erro ao enviar cancelamento:", error);
-  }
-}
-
-async function sendUpdateEmail(bookingData, attendeesList) {
-  if (!attendeesList || attendeesList.length === 0) return;
-
-  const { transporter } = await createTransporter();
-
-  // Cria um novo ical com "SEQUENCE" maior (indica atualização)
-  const calendar = ical({ name: 'Atualização de Reserva' });
-  
-  calendar.createEvent({
-    start: new Date(`${bookingData.date}T${bookingData.startTime}:00`),
-    end: new Date(`${bookingData.date}T${bookingData.endTime}:00`),
-    summary: `ATUALIZADO: ${bookingData.title || 'Reunião'}`, // Usa o título se tiver
-    description: `Esta reserva foi alterada.\nNova Data/Hora ou Assunto.\nOrganizador: ${bookingData.userEmail}`,
-    location: bookingData.roomName,
-    organizer: { name: 'Sistema', email: bookingData.userEmail },
-    sequence: 2 // Importante: força o Outlook/Gmail a entender que é uma atualização
-  });
-
-  try {
-    await transporter.sendMail({
-      from: '"Sistema de Reservas" <reservas@fgvtn.com.br>',
-      to: attendeesList,
-      subject: `ALTERAÇÃO: ${bookingData.title || 'Reunião'} - ${bookingData.date.split('-').reverse().join('/')}`,
-      text: `A reunião foi alterada. Verifique os novos detalhes.`,
-      icalEvent: {
-        filename: 'invite.ics',
-        method: 'request',
-        content: calendar.toString()
-      }
-    });
-    console.log("📨 E-mail de atualização enviado.");
-  } catch (error) {
-    console.error("❌ Erro ao enviar atualização:", error);
+    console.error("❌ Erro ao enviar confirmação ao organizador:", error);
   }
 }
 
 // --- EMAILS DE VEÍCULOS ---
-const EMAIL_SUPRIMENTOS = 'suprimentos@fgvtn.com.br';
-const URL_SISTEMA = 'http://***IP-INTERNO***:4411'; // IP do seu sistema frontend
+const EMAIL_SUPRIMENTOS = config.mail.suprimentos;
+const URL_SISTEMA = config.appUrl;
 
 const sendCarReservationEmail = async (reserva) => {
-  const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
+  const { transporter } = await createTransporter();
+  const idTag = reserva.bookingCode ? `<p style="font-size:12px; color:#888;"><b>ID da Reserva:</b> <code>${reserva.bookingCode}</code></p>` : '';
 
   // 1. Email para o funcionário
   await transporter.sendMail({
-    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    from: FROM_FLEET,
     to: reserva.userEmail,
-    subject: `🚗 Reserva Confirmada: ${reserva.carModel || reserva.carModelo}`,
+    subject: `🚗 Reserva Confirmada: ${reserva.carModel || reserva.carModelo}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
     html: `
       <h2>Sua reserva foi confirmada!</h2>
+      ${idTag}
       <p>Veículo: <b>${reserva.carModel || reserva.carModelo}</b></p>
-      <p><b>Retirada:</b> ${reserva.startDate} às ${reserva.startTime}</p>
-      <p><b>Devolução:</b> ${reserva.endDate} às ${reserva.endTime}</p>
+      <p><b>Retirada:</b> ${reserva.startDate.split('-').reverse().join('/')} às ${reserva.startTime}</p>
+      <p><b>Devolução:</b> ${reserva.endDate.split('-').reverse().join('/')} às ${reserva.endTime}</p>
       <p><b>Destino:</b> ${reserva.destino}</p>
       <p>Lembre-se de registrar a devolução no sistema ao terminar a viagem.</p>
     `
@@ -162,29 +90,32 @@ const sendCarReservationEmail = async (reserva) => {
 
   // 2. Email para Suprimentos
   await transporter.sendMail({
-    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    from: FROM_FLEET,
     to: EMAIL_SUPRIMENTOS,
-    subject: `NOVA RESERVA - Veículo: ${reserva.carModel || reserva.carModelo}`,
+    subject: `NOVA RESERVA - Veículo: ${reserva.carModel || reserva.carModelo}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
     html: `
       <h2>Nova Reserva de Frota</h2>
+      ${idTag}
       <p>O colaborador <b>${reserva.userEmail}</b> reservou um veículo.</p>
       <p><b>Veículo:</b> ${reserva.carModel || reserva.carModelo}</p>
-      <p><b>Período:</b> ${reserva.startDate} (${reserva.startTime}) até ${reserva.endDate} (${reserva.endTime})</p>
+      <p><b>Período:</b> ${reserva.startDate.split('-').reverse().join('/')} (${reserva.startTime}) até ${reserva.endDate.split('-').reverse().join('/')} (${reserva.endTime})</p>
       <p><b>Destino:</b> ${reserva.destino}</p>
     `
   });
 };
 
 const sendCarReturnEmail = async (reserva) => {
-  const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
+  const { transporter } = await createTransporter();
+  const idTag = reserva.bookingCode ? `<p style="font-size:12px; color:#888;"><b>ID da Reserva:</b> <code>${reserva.bookingCode}</code></p>` : '';
 
   // 1. Email para o funcionário
   await transporter.sendMail({
-    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    from: FROM_FLEET,
     to: reserva.userEmail,
-    subject: `✅ Devolução Registrada: ${reserva.carModelo || reserva.carModel}`,
+    subject: `✅ Devolução Registrada: ${reserva.carModelo || reserva.carModel}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
     html: `
       <h2>Veículo Devolvido com Sucesso</h2>
+      ${idTag}
       <p>A devolução do veículo <b>${reserva.carModelo || reserva.carModel}</b> foi registrada no sistema.</p>
       <p><b>KM Final:</b> ${reserva.kmRetorno}</p>
       <p><b>Nível do Tanque:</b> ${reserva.nivelTanque}</p>
@@ -194,11 +125,12 @@ const sendCarReturnEmail = async (reserva) => {
 
   // 2. Email para Suprimentos
   await transporter.sendMail({
-    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    from: FROM_FLEET,
     to: EMAIL_SUPRIMENTOS,
-    subject: `VEÍCULO DEVOLVIDO - ${reserva.carModelo || reserva.carModel}`,
+    subject: `VEÍCULO DEVOLVIDO - ${reserva.carModelo || reserva.carModel}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
     html: `
       <h2>Registro de Devolução</h2>
+      ${idTag}
       <p>O colaborador <b>${reserva.userEmail}</b> finalizou a viagem.</p>
       <p><b>Veículo:</b> ${reserva.carModelo || reserva.carModel}</p>
       <p><b>KM Retorno:</b> ${reserva.kmRetorno}</p>
@@ -211,12 +143,12 @@ const sendCarReminderEmail = async (reserva) => {
   const { transporter } = await createTransporter(); // <--- MÁGICA ADICIONADA AQUI
 
   await transporter.sendMail({
-    from: '"Sistema de Frotas FGV" <reservas@fgvtn.com.br>',
+    from: FROM_FLEET,
     to: reserva.userEmail,
     subject: `⚠️ Lembrete: Devolução do Veículo ${reserva.carModel || reserva.carModelo}`,
     html: `
       <h2>O período da sua viagem está acabando!</h2>
-      <p>Sua reserva do veículo <b>${reserva.carModel || reserva.carModelo}</b> está prevista para encerrar em breve (${reserva.endDate} às ${reserva.endTime}).</p>
+      <p>Sua reserva do veículo <b>${reserva.carModel || reserva.carModelo}</b> está prevista para encerrar em breve (${reserva.endDate.split('-').reverse().join('/')} às ${reserva.endTime}).</p>
       <p>Não se esqueça de acessar o sistema e realizar a devolução oficial (informando a KM e o combustível).</p>
       <br>
       <a href="${URL_SISTEMA}" style="background-color: #0c6192; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Acessar Sistema para Devolver</a>
@@ -224,4 +156,91 @@ const sendCarReminderEmail = async (reserva) => {
   });
 };
 
-module.exports = { sendInviteEmail, sendCancellationEmail, sendUpdateEmail, sendCarReservationEmail, sendCarReturnEmail, sendCarReminderEmail };
+const sendCarOverdueReminderEmail = async (reserva) => {
+  const { transporter } = await createTransporter();
+
+  const carName = reserva.carModel || reserva.carModelo;
+  const previsaoDevolucao = `${reserva.endDate.split('-').reverse().join('/')} às ${reserva.endTime}`;
+
+  await transporter.sendMail({
+    from: FROM_FLEET,
+    to: reserva.userEmail,
+    subject: `⏰ Devolução Pendente: ${carName} — prazo encerrado`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+        <div style="background-color: #dc2626; padding: 20px 24px; border-radius: 8px 8px 0 0;">
+          <h2 style="color: #fff; margin: 0; font-size: 20px;">⏰ Devolução do Veículo Pendente</h2>
+        </div>
+        <div style="background-color: #fff5f5; border: 1px solid #fecaca; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+          <p style="margin: 0 0 12px; font-size: 15px;">
+            Olá! O prazo de devolução do veículo <strong>${carName}</strong> já encerrou
+            (<strong>${previsaoDevolucao}</strong>) e a devolução ainda não foi registrada no sistema.
+          </p>
+          <p style="margin: 0 0 20px; font-size: 14px; color: #555;">
+            Por favor, acesse o sistema o quanto antes e registre a devolução informando
+            a quilometragem e o nível do combustível.
+          </p>
+          <a href="${URL_SISTEMA}"
+             style="background-color: #0c6192; color: white; padding: 12px 28px;
+                    text-decoration: none; border-radius: 6px; font-weight: bold;
+                    display: inline-block; font-size: 15px;">
+            Acessar Sistema e Registrar Devolução
+          </a>
+          <p style="margin: 24px 0 0; font-size: 12px; color: #999;">
+            Este lembrete é enviado automaticamente a cada hora enquanto a devolução
+            não for registrada. Em caso de dúvidas, entre em contato com o setor de Suprimentos.
+          </p>
+        </div>
+      </div>
+    `
+  });
+};
+
+const sendCarRegularizacaoEmail = async (reserva) => {
+  const { transporter } = await createTransporter();
+
+  const carName = reserva.carModel || reserva.carModelo;
+  const periodo = `${reserva.startDate.split('-').reverse().join('/')} às ${reserva.startTime} → ${reserva.endDate.split('-').reverse().join('/')} às ${reserva.endTime}`;
+  const idLine = reserva.bookingCode ? `<p style="margin: 0 0 12px;"><strong>ID da Reserva:</strong> <code>${reserva.bookingCode}</code></p>` : '';
+
+  // 1. Email para Suprimentos
+  await transporter.sendMail({
+    from: FROM_FLEET,
+    to: EMAIL_SUPRIMENTOS,
+    subject: `📋 REGULARIZAÇÃO DE RESERVA - ${carName}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+        <div style="background-color: #d97706; padding: 20px 24px; border-radius: 8px 8px 0 0;">
+          <h2 style="color: #fff; margin: 0; font-size: 20px;">⚠️ Registro Retroativo de Uso de Veículo</h2>
+        </div>
+        <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+          ${idLine}
+          <p style="margin: 0 0 12px;"><strong>Colaborador:</strong> ${reserva.userEmail}</p>
+          <p style="margin: 0 0 12px;"><strong>Veículo:</strong> ${carName}</p>
+          <p style="margin: 0 0 12px;"><strong>Período:</strong> ${periodo}</p>
+          <p style="margin: 0 0 12px;"><strong>Destino:</strong> ${reserva.destino || 'Não informado'}</p>
+          <p style="margin: 0 0 12px;"><strong>Registrado por:</strong> ${reserva.registradoPor || 'Não informado'}</p>
+          <hr style="border: none; border-top: 1px solid #fde68a; margin: 16px 0;"/>
+          <p style="font-size: 12px; color: #92400e; margin: 0;">Este registro foi lançado retroativamente pelo setor de Suprimentos.</p>
+        </div>
+      </div>
+    `
+  });
+
+  // 2. Email para o colaborador
+  await transporter.sendMail({
+    from: FROM_FLEET,
+    to: reserva.userEmail,
+    subject: `📋 Registro Regularizado: ${carName}${reserva.bookingCode ? ' [' + reserva.bookingCode + ']' : ''}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+        <h2 style="color: #d97706;">Uso de Veículo Regularizado</h2>
+        ${idLine}
+        <p>Seu uso do veículo <strong>${carName}</strong> no período <strong>${periodo}</strong> foi regularizado no sistema pelo setor de Suprimentos.</p>
+        <p style="font-size: 12px; color: #666;">Em caso de dúvidas, entre em contato com o setor de Suprimentos.</p>
+      </div>
+    `
+  });
+};
+
+module.exports = { sendBookingConfirmationEmail, sendCarReservationEmail, sendCarReturnEmail, sendCarReminderEmail, sendCarOverdueReminderEmail, sendCarRegularizacaoEmail };

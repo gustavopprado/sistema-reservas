@@ -1,26 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check } from 'lucide-react';
-import api from '../api'; 
-import usersList from '../users.json'; 
+import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText } from 'lucide-react';
+import api from '../api';
+import usersList from '../users.json';
 // 1. IMPORTAR O TOAST
 import toast from 'react-hot-toast';
+import TermoPdfModal from './TermoPdfModal';
 
-export default function ReservationModal({ 
-  room, onClose, onSuccess, initialDate, initialTime, currentUserEmail, editingBooking 
+const ID_SALAO = 'j7QOhdPRzEJcza2cMqwM';
+const TERMO_SALAO_PDF = '/termos/it-depsu-30-salao.pdf';
+
+export default function ReservationModal({
+  room, onClose, onSuccess, initialDate, initialTime, currentUserEmail, editingBooking
 }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
+  const isSalao = room.id === ID_SALAO;
+  const [confirmedTerms, setConfirmedTerms] = useState(false);
+  const [showTermoModal, setShowTermoModal] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     date: initialDate || new Date().toISOString().split('T')[0],
     startTime: initialTime || '',
     endTime: initialTime ? (parseInt(initialTime.split(':')[0]) + 1).toString().padStart(2, '0') + ':00' : '',
     userEmail: currentUserEmail || '',
-    attendees: ''
+    attendees: '',
+    notes: ''
   });
   
-  const [busySlots, setBusySlots] = useState([]); 
+  const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [busyAttendees, setBusyAttendees] = useState([]);
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
   // Removemos o estado 'error' local pois o toast vai cuidar disso
 
   const [suggestions, setSuggestions] = useState([]);
@@ -35,7 +45,8 @@ export default function ReservationModal({
         startTime: editingBooking.startTime,
         endTime: editingBooking.endTime,
         userEmail: editingBooking.userEmail,
-        attendees: editingBooking.attendees || ''
+        attendees: editingBooking.attendees || '',
+        notes: editingBooking.notes || ''
       });
     }
   }, [editingBooking]);
@@ -43,6 +54,44 @@ export default function ReservationModal({
   useEffect(() => {
     if (formData.date && room.id) fetchBusySlots();
   }, [formData.date, room.id]);
+
+  // Checa a disponibilidade dos convidados no Google Agenda (free/busy).
+  // Roda com um pequeno atraso (debounce) sempre que mudam convidados/horário.
+  useEffect(() => {
+    const parseEmails = (texto) =>
+      (texto || '')
+        .split(',')
+        .map((e) => e.trim())
+        .filter((e) => e !== '' && e.includes('@'));
+
+    const emails = parseEmails(formData.attendees);
+
+    if (emails.length === 0 || !formData.date || !formData.startTime || !formData.endTime) {
+      setBusyAttendees([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setCheckingAvailability(true);
+      try {
+        const response = await api.post('/calendar/freebusy', {
+          requesterEmail: formData.userEmail,
+          emails,
+          date: formData.date,
+          startTime: formData.startTime,
+          endTime: formData.endTime
+        });
+        setBusyAttendees(ensureArray(response.data?.conflitos));
+      } catch (err) {
+        console.error('Erro ao checar disponibilidade dos convidados:', err);
+        setBusyAttendees([]);
+      } finally {
+        setCheckingAvailability(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [formData.attendees, formData.date, formData.startTime, formData.endTime, formData.userEmail]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -108,13 +157,19 @@ export default function ReservationModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (isSalao && !confirmedTerms) {
+      toast.error('Você precisa ler o termo de uso e confirmar a ciência para reservar o salão.');
+      return;
+    }
+
     setLoading(true);
 
     // 2. LOGICA NOVA COM TOAST PROMISE
     // O toast.promise "abraça" a requisição
-    const promise = editingBooking 
+    const promise = editingBooking
       ? api.put(`/bookings/${editingBooking.id}`, { roomId: room.id, ...formData })
-      : api.post('/bookings', { roomId: room.id, roomName: room.nome, ...formData });
+      : api.post('/bookings', { roomId: room.id, roomName: room.nome, termConfirmed: isSalao ? confirmedTerms : false, ...formData });
 
     toast.promise(
        promise,
@@ -248,13 +303,88 @@ export default function ReservationModal({
               )}
             </div>
 
+            {/* ANOTAÇÕES / PAUTA */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Anotações / Pauta</label>
+              <div className="relative group">
+                <FileText className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
+                <textarea
+                  name="notes"
+                  value={formData.notes}
+                  placeholder="Descreva o assunto ou a pauta da reunião (opcional)..."
+                  rows="3"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all"
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            {/* AVISO DE DISPONIBILIDADE DOS CONVIDADOS */}
+            {checkingAvailability && (
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-brand"></div>
+                Verificando agenda dos convidados...
+              </div>
+            )}
+            {!checkingAvailability && busyAttendees.length > 0 && (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+                <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold">Conflito de agenda neste horário:</p>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                    {busyAttendees.map((email) => (
+                      <li key={email} className="break-all">{email}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-xs text-amber-700">
+                    Você ainda pode reservar, mas essas pessoas já têm compromisso no período.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* TERMO DE USO DO SALÃO — apenas para o Salão */}
+            {isSalao && (
+              confirmedTerms ? (
+                <div className="rounded-xl border p-4 bg-green-50 border-green-300">
+                  <div className="flex items-start gap-2.5">
+                    <Check size={18} className="text-green-600 mt-0.5 shrink-0" />
+                    <p className="text-sm font-semibold text-gray-800">
+                      Li a Instrução de Trabalho para uso do salão de eventos e me comprometo em seguir as orientações nela descritas.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowTermoModal(true)}
+                    className="text-xs text-brand hover:underline mt-2 ml-7"
+                  >
+                    Ler novamente o termo
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border p-4 bg-amber-50 border-amber-300">
+                  <p className="text-xs text-gray-700 leading-relaxed mb-3">
+                    Para reservar o salão de eventos é necessário ler a Instrução de Trabalho de uso do salão e confirmar a ciência ao final do documento.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowTermoModal(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-brand border border-brand/40 bg-white hover:bg-brand/5 transition-colors"
+                  >
+                    <FileText size={18} />
+                    Ler termo de uso do salão
+                  </button>
+                </div>
+              )
+            )}
+
             {/* BOTÕES DE AÇÃO */}
             <div className="pt-4 flex gap-3">
-              <button 
-                type="submit" 
-                disabled={loading}
+              <button
+                type="submit"
+                disabled={loading || (isSalao && !confirmedTerms)}
                 className={`flex-1 py-3 rounded-xl font-bold text-white transition-all shadow-md transform active:scale-95
-                  ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover shadow-brand'}
+                  ${loading || (isSalao && !confirmedTerms) ? 'bg-gray-400 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover shadow-brand'}
                 `}
               >
                 {loading ? 'Salvando...' : (editingBooking ? 'Salvar Alterações' : 'Confirmar Reserva')}
@@ -315,6 +445,18 @@ export default function ReservationModal({
         </div>
 
       </div>
+
+      {/* MODAL DO TERMO DE USO (PDF) */}
+      {showTermoModal && (
+        <TermoPdfModal
+          pdfUrl={TERMO_SALAO_PDF}
+          onClose={() => setShowTermoModal(false)}
+          onConfirm={() => {
+            setConfirmedTerms(true);
+            setShowTermoModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }
