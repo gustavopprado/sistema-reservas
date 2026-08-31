@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Download, FileText, Filter, Users, Calendar, BookOpen, Shield, X } from 'lucide-react';
+import { Search, Download, FileText, Filter, Users, Calendar, BookOpen, Shield, X, UsersRound } from 'lucide-react';
 import api from '../api';
+import AdminEmailGroupsPanel from './AdminEmailGroupsPanel';
 
 const ID_SALAO = 'j7QOhdPRzEJcza2cMqwM';
 
@@ -105,6 +106,7 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [aba, setAba] = useState('reservas');
 
   const fetchBookings = useCallback(async (activeFilters = filters) => {
     setLoading(true);
@@ -173,6 +175,26 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
 
   return (
     <div className="animate-fade-in-up">
+      {/* Abas do painel */}
+      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+        {[
+          { id: 'reservas', label: 'Reservas', Icon: BookOpen },
+          { id: 'grupos',   label: 'Grupos de E-mail', Icon: UsersRound },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setAba(id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              aba === id ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'grupos' ? <AdminEmailGroupsPanel /> : (
+      <>
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {stats.map(({ label, value, Icon, color }) => (
@@ -316,6 +338,8 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

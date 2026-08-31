@@ -24,6 +24,8 @@ const {
   deleteCalendarEvent,
   getFreeBusy
 } = require('./calendarService');
+const directory = require('./directoryService');
+const emailGroups = require('./emailGroups');
 
 // --- CONSTANTES DE ADMINISTRAÇÃO ---
 const ADMIN_EMAIL = config.admin.roomsAdmin;
@@ -50,6 +52,60 @@ const db = admin.firestore();
 
 app.use(cors());
 app.use(express.json());
+
+// ==========================================
+//        AUTENTICAÇÃO (ROTAS NOVAS)
+// ==========================================
+// As rotas de diretório devolvem nomes e e-mails de toda a organização —
+// dado pessoal. Por isso elas exigem um ID Token do Firebase, enviado
+// automaticamente pelo interceptor em client/src/api.js.
+//
+// As rotas antigas seguem sem verificação para não quebrar nada em produção;
+// migrá-las é um passo separado (ver README).
+
+/** Exige um usuário autenticado no Firebase do projeto. */
+async function requireAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+  if (!token) {
+    return res.status(401).json({ error: 'Autenticação necessária.' });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    const email = (decoded.email || '').toLowerCase();
+
+    if (!email) {
+      return res.status(403).json({ error: 'Conta sem e-mail associado.' });
+    }
+
+    const dominios = config.auth.allowedDomains;
+    if (dominios.length > 0) {
+      const dominio = email.split('@')[1] || '';
+      if (!dominios.includes(dominio)) {
+        return res.status(403).json({ error: 'Domínio não autorizado.' });
+      }
+    }
+
+    req.authUser = { email, uid: decoded.uid };
+    next();
+  } catch (error) {
+    console.error('Falha ao validar ID Token:', error.message);
+    return res.status(401).json({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
+  }
+}
+
+/** Exige que o usuário autenticado seja um dos admins configurados. */
+function requireAdmin(req, res, next) {
+  const admins = [config.admin.roomsAdmin, config.admin.bookingsReportAdmin]
+    .filter((email) => email && email.length > 0);
+
+  if (!admins.includes(req.authUser.email)) {
+    return res.status(403).json({ error: 'Acesso restrito à administração.' });
+  }
+  next();
+}
 
 // ==========================================
 //          ROTAS DE SALAS DE REUNIÃO
@@ -94,14 +150,6 @@ app.post('/bookings', async (req, res) => {
       return res.status(400).json({ error: 'Não é possível criar reservas no passado.' });
     }
 
-    let attendeesList = [];
-    if (attendees && attendees.trim().length > 0) {
-      attendeesList = attendees
-        .split(',')
-        .map(e => e.trim())
-        .filter(e => e !== '');
-    }
-
     const bookingsRef = db.collection('bookings');
     const snapshot = await bookingsRef
       .where('roomId', '==', roomId)
@@ -119,6 +167,12 @@ app.post('/bookings', async (req, res) => {
     if (conflito) {
       return res.status(409).json({ error: 'Já existe uma reserva neste horário!' });
     }
+
+    // Expande grupos (do painel e Google Groups) em pessoas. O texto original
+    // digitado pelo usuário continua salvo em `attendees`, para que a edição
+    // da reserva mostre o grupo em vez de dezenas de e-mails soltos.
+    const convidados = await emailGroups.resolverConvidados(attendees);
+    const attendeesList = convidados.emails;
 
     const guestStatuses = {};
     attendeesList.forEach(email => {
@@ -164,7 +218,10 @@ app.post('/bookings', async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Sala reservada com sucesso!',
-      googleEventLink: googleEvent ? googleEvent.htmlLink : null
+      googleEventLink: googleEvent ? googleEvent.htmlLink : null,
+      totalConvidados: attendeesList.length,
+      gruposExpandidos: convidados.gruposUsados,
+      naoResolvidos: convidados.naoResolvidos
     });
   } catch (error) {
     console.error('Erro na rota de reserva:', error);
@@ -222,9 +279,18 @@ app.post('/calendar/freebusy', async (req, res) => {
       return res.status(400).json({ error: 'date, startTime e endTime são obrigatórios.' });
     }
 
-    const lista = Array.isArray(emails)
+    const recebidos = Array.isArray(emails)
       ? emails.map(e => (e || '').trim()).filter(e => e !== '')
       : [];
+
+    if (recebidos.length === 0) {
+      return res.json({ busy: {}, conflitos: [] });
+    }
+
+    // O front já expande os grupos antes de chamar, mas resolvemos de novo aqui
+    // para que um token de grupo nunca vá para a consulta free/busy como se
+    // fosse uma pessoa (o Google devolveria erro para aquele "calendário").
+    const { emails: lista } = await emailGroups.resolverConvidados(recebidos.join(','));
 
     if (lista.length === 0) {
       return res.json({ busy: {}, conflitos: [] });
@@ -332,13 +398,11 @@ app.put('/bookings/:id', async (req, res) => {
       return res.status(409).json({ error: 'Novo horário indisponível!' });
     }
 
-    let attendeesList = [];
-    if (attendees && attendees.trim().length > 0) {
-      attendeesList = attendees
-        .split(',')
-        .map(e => e.trim())
-        .filter(e => e !== '');
-    }
+    // Mesma expansão de grupos da criação. Como o token do grupo fica salvo em
+    // `attendees`, editar uma reserva antiga reexpande o grupo com os membros
+    // ATUAIS — quem entrou depois passa a ser convidado, quem saiu deixa de ser.
+    const convidados = await emailGroups.resolverConvidados(attendees);
+    const attendeesList = convidados.emails;
 
     const previousStatuses = currentData.guestStatuses || {};
     const guestStatuses = {};
@@ -387,7 +451,13 @@ app.put('/bookings/:id', async (req, res) => {
     // A atualização/criação do evento no Google já notifica os convidados
     // (sendUpdates: 'all'), então não enviamos e-mail próprio aqui.
 
-    res.json({ success: true, message: 'Reserva atualizada com sucesso!' });
+    res.json({
+      success: true,
+      message: 'Reserva atualizada com sucesso!',
+      totalConvidados: attendeesList.length,
+      gruposExpandidos: convidados.gruposUsados,
+      naoResolvidos: convidados.naoResolvidos
+    });
   } catch (error) {
     console.error('Erro ao atualizar reserva:', error);
     res.status(500).json({ error: 'Erro ao atualizar.' });
@@ -525,6 +595,156 @@ app.get('/bookings/admin', async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar reservas (admin):', error);
     res.status(500).json({ error: 'Erro interno.' });
+  }
+});
+
+// ==========================================
+//     ROTAS DE DIRETÓRIO E GRUPOS DE E-MAIL
+// ==========================================
+
+// ROTA: Colaboradores da organização (alimenta o autocomplete de convidados).
+// Fonte: Google Workspace via Admin SDK. Se a integração estiver desligada ou
+// falhar, devolve lista vazia com um aviso — o front usa o fallback local.
+app.get('/directory/users', requireAuth, async (req, res) => {
+  if (!directory.isEnabled()) {
+    return res.json({
+      users: [],
+      fonte: 'desativada',
+      aviso: 'Integração com o diretório do Workspace não configurada (DIRECTORY_ADMIN_SUBJECT).'
+    });
+  }
+
+  try {
+    const users = await directory.listUsers();
+    res.json({ users, fonte: 'workspace', aviso: null });
+  } catch (error) {
+    const aviso = directory.explainError(error);
+    console.error('Erro ao listar usuários do diretório:', aviso);
+    res.json({ users: [], fonte: 'erro', aviso });
+  }
+});
+
+// ROTA: Grupos disponíveis para convite — os do painel + os Google Groups.
+// Os membros vêm junto para o front poder checar free/busy por pessoa sem
+// precisar de outra chamada.
+app.get('/directory/groups', requireAuth, async (req, res) => {
+  try {
+    const { doPainel, doGoogle, avisoGoogle } = await emailGroups.listarTodosGrupos();
+
+    const grupos = [
+      ...doPainel.map((g) => ({
+        id: g.id,
+        token: `${emailGroups.PREFIXO_TOKEN}${g.slug}`,
+        nome: g.nome,
+        descricao: g.descricao,
+        tipo: 'painel',
+        membros: g.membros,
+      })),
+      ...doGoogle.map((g) => ({
+        id: g.id,
+        token: g.email,
+        nome: g.nome,
+        descricao: g.descricao,
+        tipo: 'google',
+        membros: g.membros,
+      })),
+    ];
+
+    res.json({ grupos, aviso: avisoGoogle });
+  } catch (error) {
+    console.error('Erro ao listar grupos:', error);
+    res.status(500).json({ error: 'Erro ao listar grupos de e-mail.' });
+  }
+});
+
+// ROTA: Descarta o cache do diretório (botão de atualizar no painel).
+app.post('/directory/refresh', requireAuth, requireAdmin, (req, res) => {
+  directory.invalidateCache();
+  res.json({ success: true, message: 'Cache do diretório limpo.' });
+});
+
+// ROTA: Diagnóstico da integração — mostra o que falta configurar no Google.
+app.get('/directory/status', requireAuth, requireAdmin, async (req, res) => {
+  const status = {
+    configurado: directory.isEnabled(),
+    adminSubject: config.directory.adminSubject || null,
+    serviceAccountClientId: directory.serviceAccountClientId,
+    cacheTtlMinutes: config.directory.cacheTtlMinutes,
+    usuarios: { ok: false, total: 0, erro: null },
+    grupos: { ok: false, total: 0, erro: null },
+  };
+
+  if (!status.configurado) {
+    status.usuarios.erro = 'DIRECTORY_ADMIN_SUBJECT não definido em api/.env.';
+    status.grupos.erro = status.usuarios.erro;
+    return res.json(status);
+  }
+
+  try {
+    const users = await directory.listUsers();
+    status.usuarios = { ok: true, total: users.length, erro: null };
+  } catch (error) {
+    status.usuarios.erro = directory.explainError(error);
+  }
+
+  try {
+    const grupos = await directory.listGoogleGroups();
+    status.grupos = { ok: true, total: grupos.length, erro: null };
+  } catch (error) {
+    status.grupos.erro = directory.explainError(error);
+  }
+
+  res.json(status);
+});
+
+// ROTA: Lista os grupos criados no painel (visão de administração).
+app.get('/admin/email-groups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const grupos = await emailGroups.listarGruposPainel();
+    res.json(grupos);
+  } catch (error) {
+    console.error('Erro ao listar grupos do painel:', error);
+    res.status(500).json({ error: 'Erro ao listar grupos.' });
+  }
+});
+
+// ROTA: Cria um grupo no painel.
+app.post('/admin/email-groups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nome, descricao, membros } = req.body;
+    const grupo = await emailGroups.criarGrupo({
+      nome,
+      descricao,
+      membros,
+      criadoPor: req.authUser.email,
+    });
+    res.status(201).json(grupo);
+  } catch (error) {
+    console.error('Erro ao criar grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao criar grupo.' });
+  }
+});
+
+// ROTA: Edita um grupo do painel.
+app.put('/admin/email-groups/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nome, descricao, membros } = req.body;
+    const grupo = await emailGroups.atualizarGrupo(req.params.id, { nome, descricao, membros });
+    res.json(grupo);
+  } catch (error) {
+    console.error('Erro ao atualizar grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao atualizar grupo.' });
+  }
+});
+
+// ROTA: Remove um grupo do painel.
+app.delete('/admin/email-groups/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await emailGroups.removerGrupo(req.params.id);
+    res.json({ success: true, message: 'Grupo removido.' });
+  } catch (error) {
+    console.error('Erro ao remover grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao remover grupo.' });
   }
 });
 

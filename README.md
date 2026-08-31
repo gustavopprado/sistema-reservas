@@ -31,7 +31,7 @@ cp client/.env.example client/.env
 cp client/src/users.example.json client/src/users.json
 ```
 
-Depois preencha os três arquivos com os valores reais. O `users.json` alimenta o autocomplete de convidados e contém nomes e e-mails de colaboradores — é dado pessoal e também não pode ser versionado. O backend valida a configuração no boot e **derruba o processo com mensagem explícita** se alguma variável obrigatória estiver faltando.
+Depois preencha os três arquivos com os valores reais. O `users.json` é hoje apenas o **fallback** do autocomplete de convidados — a fonte normal é o diretório do Google Workspace (ver [Integração com o Google Workspace](#-integração-com-o-google-workspace)). Ele contém nomes e e-mails de colaboradores, então é dado pessoal e também não pode ser versionado. O backend valida a configuração no boot e **derruba o processo com mensagem explícita** se alguma variável obrigatória estiver faltando.
 
 Veja a seção [Segurança](#-segurança) para os detalhes.
 
@@ -45,7 +45,7 @@ Veja a seção [Segurança](#-segurança) para os detalhes.
 - **node-cron** — robôs automáticos de lembrete (a cada 15 min e por hora)
 - **Nodemailer** — envio de e-mails via Gmail SMTP
 - **ical-generator** — convites `.ics` compatíveis com Outlook, Google Calendar e Apple Calendar
-- **googleapis** — criação de eventos na agenda corporativa via Service Account
+- **googleapis** — eventos na agenda corporativa e leitura do diretório do Workspace (Admin SDK) via Service Account
 - **dotenv** — carregamento da configuração de ambiente
 
 **Frontend (`client/`)**
@@ -58,7 +58,7 @@ Veja a seção [Segurança](#-segurança) para os detalhes.
 - **lucide-react** — ícones SVG
 
 **Infraestrutura**
-- **Firebase Firestore** — banco NoSQL (coleções: `rooms`, `bookings`, `cars`, `car_bookings`, `car_costs`)
+- **Firebase Firestore** — banco NoSQL (coleções: `rooms`, `bookings`, `cars`, `car_bookings`, `car_costs`, `email_groups`)
 - **Gmail SMTP** — remetente único de todas as notificações
 - **PM2** — gerenciamento do processo Node em produção
 
@@ -75,6 +75,8 @@ sistema-reservas/
 │   ├── index.js                # Entry point — todas as rotas da API e cron jobs
 │   ├── config.js               # Fonte única de configuração (lê o .env)
 │   ├── calendarService.js      # Integração com Google Calendar
+│   ├── directoryService.js     # Leitura do diretório do Workspace (pessoas + Google Groups)
+│   ├── emailGroups.js          # Grupos do painel e expansão da lista de convidados
 │   ├── mailer.js               # E-mails: convites, cancelamentos, frota, lembretes
 │   ├── seed.js                 # Script para popular o banco com dados iniciais
 │   ├── .env.example            # Modelo de configuração (versionado)
@@ -92,8 +94,8 @@ sistema-reservas/
     │   └── termos/             # Instruções de trabalho e manuais em PDF
     └── src/
         ├── config.js           # Configuração do frontend (lê o .env)
-        ├── users.example.json  # Modelo do diretório de colaboradores (versionado)
-        ├── users.json          # Diretório real (NÃO versionado)
+        ├── users.example.json  # Modelo do diretório local (versionado)
+        ├── users.json          # Fallback do autocomplete (NÃO versionado)
         ├── api.js              # Instância configurada do Axios
         ├── firebase-config.js  # Configuração do Firebase Client SDK
         ├── App.jsx             # Roteamento entre Hub / Salas / Veículos
@@ -111,6 +113,7 @@ sistema-reservas/
             ├── ReservationModal.jsx        # Modal de criação e edição de reservas
             ├── MyBookings.jsx              # Reservas próprias e convites recebidos
             ├── AdminRoomPanel.jsx          # Painel de histórico completo de salas
+            ├── AdminEmailGroupsPanel.jsx   # Painel de grupos de convidados e diretório
             │
             └── — Módulo Veículos —
                 ├── CarSystem.jsx               # Container principal do módulo de frota
@@ -143,10 +146,17 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - **Agenda Diária** — linha do tempo visual com os blocos ocupados de cada sala no dia selecionado. Clique em um horário vazio abre o modal de reserva já preenchido.
 - **Visão Mensal** — calendário mensal por sala, destacando os dias com reservas.
 - **Criar Reserva** — formulário com título, data, horário de início/fim e lista de convidados (separados por vírgula). Validação de conflito em tempo real antes de salvar.
+- **Convidados vindos do Workspace** — o autocomplete lista os colaboradores ativos direto do Google Workspace (Admin SDK Directory API), com cache de 15 minutos. Admissões e desligamentos refletem sozinhos, sem editar arquivo nenhum.
+- **Grupos de convidados** — é possível convidar um grupo inteiro em vez de digitar cada pessoa. Dois tipos convivem no mesmo autocomplete:
+  - **Grupos do painel** — criados pelo admin na aba *Grupos de E-mail*, referenciados pelo token `grupo:<slug>`. Servem para combinações que não existem no Workspace (ex.: "Comitê de Obras").
+  - **Google Groups** — os grupos reais da organização, referenciados pelo próprio e-mail do grupo. Somente leitura; os membros são gerenciados no Admin Console do Google.
+
+  Em ambos os casos a expansão em pessoas acontece **no backend**, na hora de salvar. Isso mantém o free/busy e o RSVP funcionando por pessoa, e faz com que editar uma reserva antiga reexpanda o grupo com os membros **atuais**.
 - **Editar Reserva** — altera horário, data e convidados. Envia e-mail de atualização automaticamente para todos os participantes.
 - **Cancelar Reserva** — remove a reserva e envia e-mail de cancelamento com evento iCal para retirar o compromisso da agenda dos convidados.
 - **Minhas Reservas** — lista as reservas do usuário (como organizador) e convites recebidos (como convidado). Permite responder ao convite (RSVP) com aceitar ou recusar.
 - **Painel de Histórico** — consulta completa de reservas com filtros por período, sala e usuário (restrito ao admin definido em `ADMIN_BOOKINGS_EMAIL`).
+- **Painel de Grupos de E-mail** — na mesma tela do histórico, aba *Grupos de E-mail*: cria, edita e exclui grupos do painel, lista os Google Groups da organização e mostra o diagnóstico da integração com o Workspace (quantas pessoas e grupos foram sincronizados, ou exatamente o que falta configurar).
 
 **Regras de negócio**
 
@@ -297,6 +307,64 @@ npm run build
 
 ---
 
+## 🔗 Integração com o Google Workspace
+
+A Service Account do projeto usa **Delegação em Todo o Domínio** (Domain-Wide Delegation) para duas coisas: criar eventos na agenda do organizador (já em uso) e **ler o diretório da organização** (pessoas e Google Groups). A segunda precisa de configuração extra no Google — sem ela o sistema continua funcionando, mas cai no fallback local do autocomplete.
+
+### Passo 1 — Ativar a Admin SDK API
+
+No [Google Cloud Console](https://console.cloud.google.com), com o projeto do Firebase selecionado:
+
+*APIs e serviços → Biblioteca → Admin SDK API → **Ativar***
+
+### Passo 2 — Autorizar os escopos na Delegação em Todo o Domínio
+
+No [Admin Console do Workspace](https://admin.google.com):
+
+*Segurança → Controles de acesso e dados → Controles de API → Delegação em todo o domínio → **Gerenciar delegação em todo o domínio***
+
+Localize (ou adicione) o **Client ID da Service Account** e inclua estes dois escopos, além dos que já existirem:
+
+```
+https://www.googleapis.com/auth/admin.directory.user.readonly
+https://www.googleapis.com/auth/admin.directory.group.readonly
+```
+
+O Client ID está no campo `client_id` do `api/serviceAccountKey.json`. A tela `/directory/status` do painel também mostra esse valor.
+
+> Os dois escopos são pedidos em clientes separados no código: se apenas o de usuários for autorizado, o autocomplete de pessoas funciona mesmo que a listagem de grupos falhe.
+
+### Passo 3 — Apontar a conta de administrador
+
+A Directory API só responde para uma conta com privilégio administrativo no Workspace. Preencha em `api/.env`:
+
+```env
+DIRECTORY_ADMIN_SUBJECT=admin@seudominio.com.br
+ALLOWED_EMAIL_DOMAINS=seudominio.com.br
+```
+
+Depois reinicie a API. Deixar `DIRECTORY_ADMIN_SUBJECT` vazio desliga a integração de propósito.
+
+### Passo 4 — Conferir
+
+Entre no sistema com a conta de admin: **Reserva de Salas → Admin → Grupos de E-mail**. O cartão do topo informa quantas pessoas e quantos Google Groups foram sincronizados — ou exatamente o que falta configurar, com a mensagem já traduzida para uma ação concreta.
+
+### Passo 5 — Aposentar o `users.json`
+
+Confirmado o Passo 4, a lista local deixa de ter função. Como ela é importada pelo frontend, os e-mails vão para o bundle público em `client/dist` — removê-la é o que de fato tira esse dado pessoal do ar:
+
+1. Apague o `import usersList from '../users.json'` de `client/src/components/ReservationModal.jsx` e as duas referências a `usersList` no fallback.
+2. Apague `client/src/users.json`.
+3. Rode `npm run build` novamente.
+
+Até esse passo o arquivo permanece como rede de proteção, para o autocomplete não ficar vazio se a delegação cair.
+
+### Cache
+
+A lista de pessoas e grupos fica em memória por `DIRECTORY_CACHE_TTL_MINUTES` (padrão 15). O autocomplete consulta a cada tecla digitada; sem cache isso viraria uma rajada de chamadas à API do Google. O botão **Atualizar** no painel força a releitura imediata (`POST /directory/refresh`), útil depois de admitir alguém.
+
+---
+
 ## 🔥 Firebase
 
 ### Coleções do Firestore
@@ -308,6 +376,7 @@ npm run build
 | `cars` | Veículos cadastrados (modelo, placa, categoria, KM atual) |
 | `car_bookings` | Reservas de veículo (período, destino, status, KM, código `VEI-`) |
 | `car_costs` | Custos registrados por veículo (combustível, manutenção, multa, etc.) |
+| `email_groups` | Grupos de convidados criados no painel de admin (`nome`, `slug`, `descricao`, `membros[]`) |
 
 ---
 
@@ -324,7 +393,7 @@ Este repositório é **público**. As regras abaixo não são opcionais.
 | Senha do Painel Suprimentos | `api/.env` → `ADMIN_FINALIZE_PASSWORD` | ❌ Nunca |
 | E-mails de administração | `api/.env` e `client/.env` | ❌ Nunca |
 | Chaves do Firebase Web SDK | `client/.env` | ❌ Nunca |
-| Diretório de colaboradores (nomes e e-mails) | `client/src/users.json` | ❌ Nunca — dado pessoal / LGPD |
+| Diretório de colaboradores (nomes e e-mails) | `client/src/users.json` — **apenas fallback** | ❌ Nunca — dado pessoal / LGPD |
 | Modelos de configuração | `*.env.example`, `users.example.json` | ✅ Sim |
 
 As chaves do Firebase Web SDK são públicas por design — a proteção real vem das **Firestore Security Rules** e da lista de domínios autorizados no Firebase Console.
@@ -340,7 +409,7 @@ As chaves do Firebase Web SDK são públicas por design — a proteção real ve
 
 Pontos que ainda precisam ser endereçados:
 
-- **A API não autentica requisições.** As 31 rotas aceitam qualquer chamada, e o CORS está aberto (`app.use(cors())`). A identidade do usuário chega por query string ou corpo da requisição, sem validação. O caminho correto é um middleware que verifique o ID token do Firebase com `admin.auth().verifyIdToken()`.
+- **A maioria das rotas ainda não autentica requisições.** O CORS está aberto (`app.use(cors())`) e, nas rotas antigas, a identidade do usuário chega por query string ou corpo da requisição, sem validação. O middleware `requireAuth` (que verifica o ID token do Firebase com `admin.auth().verifyIdToken()`) já existe em `api/index.js` e protege as rotas de diretório e grupos — **falta aplicá-lo às rotas antigas**, uma a uma, junto do ajuste correspondente no frontend.
 - **A autorização é feita no frontend.** As listas de admin em `client/.env` são embutidas no bundle e podem ser lidas por qualquer usuário. Servem para controlar a *interface*, não o *acesso* — a validação precisa existir no backend.
 - **Não há Firestore Security Rules versionadas** neste repositório.
 - **A senha do Painel Suprimentos é compartilhada** e comparada em texto puro.
@@ -363,6 +432,21 @@ Pontos que ainda precisam ser endereçados:
 | `PUT` | `/bookings/:id` | Edita reserva |
 | `PUT` | `/bookings/:id/rsvp` | Responde convite (`aceito`, `recusado`, `pendente`) |
 | `DELETE` | `/bookings/:id` | Cancela reserva |
+
+### Diretório e grupos de convidados
+
+Estas rotas exigem um **ID Token do Firebase** no header `Authorization: Bearer <token>` — o interceptor em `client/src/api.js` anexa automaticamente. As marcadas como *admin* exigem também que o e-mail autenticado seja `ADMIN_EMAIL` ou `ADMIN_BOOKINGS_EMAIL`.
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/directory/users` | Colaboradores ativos da organização (alimenta o autocomplete) |
+| `GET` | `/directory/groups` | Grupos disponíveis para convite — do painel + Google Groups, com membros |
+| `GET` | `/directory/status` | *admin* — diagnóstico da integração com o Workspace |
+| `POST` | `/directory/refresh` | *admin* — descarta o cache do diretório |
+| `GET` | `/admin/email-groups` | *admin* — lista os grupos do painel |
+| `POST` | `/admin/email-groups` | *admin* — cria grupo (`nome`, `descricao`, `membros[]`) |
+| `PUT` | `/admin/email-groups/:id` | *admin* — edita grupo |
+| `DELETE` | `/admin/email-groups/:id` | *admin* — exclui grupo |
 
 ### Veículos
 

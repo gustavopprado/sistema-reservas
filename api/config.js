@@ -71,6 +71,28 @@ const config = {
     id: optional('RESTRICTED_ROOM_ID', ''),
     allowedEmails: list('RESTRICTED_ROOM_EMAILS'),
   },
+
+  directory: {
+    // E-mail de um ADMINISTRADOR do Google Workspace. A Service Account
+    // personifica essa conta para ler o diretório (Admin SDK Directory API).
+    // Vazio = integração desligada; o sistema cai no fallback local.
+    adminSubject: optional('DIRECTORY_ADMIN_SUBJECT', '').toLowerCase(),
+
+    // Por quanto tempo a lista de pessoas/grupos fica em cache na memória.
+    cacheTtlMinutes: Number(optional('DIRECTORY_CACHE_TTL_MINUTES', '15')),
+
+    // Permite desligar só a listagem de Google Groups, mantendo as pessoas.
+    includeGoogleGroups: optional('DIRECTORY_INCLUDE_GOOGLE_GROUPS', 'true') !== 'false',
+
+    // Contas de serviço/robô que não devem aparecer no autocomplete.
+    excludedEmails: list('DIRECTORY_EXCLUDED_EMAILS'),
+  },
+
+  auth: {
+    // Domínios cujos usuários podem consultar o diretório pela API.
+    // Vazio = qualquer conta autenticada no Firebase do projeto.
+    allowedDomains: list('ALLOWED_EMAIL_DOMAINS'),
+  },
 };
 
 module.exports = config;

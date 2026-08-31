@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText } from 'lucide-react';
+import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText, UsersRound } from 'lucide-react';
 import api from '../api';
+// Lista local: usada apenas como fallback se o diretório do Workspace estiver
+// indisponível. A fonte normal é a rota /directory/users.
 import usersList from '../users.json';
 // 1. IMPORTAR O TOAST
 import toast from 'react-hot-toast';
@@ -37,6 +39,94 @@ export default function ReservationModal({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef(null);
 
+  // Diretório da organização (pessoas) e grupos de convite disponíveis.
+  const [pessoas, setPessoas] = useState([]);
+  const [grupos, setGrupos] = useState([]);
+  const [avisoDiretorio, setAvisoDiretorio] = useState(null);
+
+  // Carrega pessoas e grupos uma vez, ao abrir o modal.
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregar = async () => {
+      const [resPessoas, resGrupos] = await Promise.allSettled([
+        api.get('/directory/users'),
+        api.get('/directory/groups')
+      ]);
+
+      if (cancelado) return;
+
+      const doWorkspace = resPessoas.status === 'fulfilled'
+        ? ensureArray(resPessoas.value.data?.users)
+        : [];
+
+      if (doWorkspace.length > 0) {
+        setPessoas(doWorkspace);
+        setAvisoDiretorio(null);
+      } else {
+        // Fallback: mantém o autocomplete funcionando com a lista local.
+        setPessoas(usersList);
+        const motivo = resPessoas.status === 'fulfilled'
+          ? resPessoas.value.data?.aviso
+          : resPessoas.reason?.response?.data?.error;
+        setAvisoDiretorio(motivo || 'Diretório do Workspace indisponível — usando a lista local.');
+        console.warn('Diretório indisponível:', motivo);
+      }
+
+      if (resGrupos.status === 'fulfilled') {
+        setGrupos(ensureArray(resGrupos.value.data?.grupos));
+      }
+    };
+
+    carregar();
+    return () => { cancelado = true; };
+  }, []);
+
+  /**
+   * Traduz o conteúdo do campo "Convidados" em pessoas de verdade.
+   * Um token pode ser um e-mail, um grupo do painel (`grupo:<slug>`) ou o
+   * e-mail de um Google Group. O backend faz a mesma expansão na hora de
+   * salvar; aqui ela serve para o free/busy e para o resumo na tela.
+   */
+  const expandirConvidados = (texto) => {
+    const tokens = (texto || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    const emails = [];
+    const vistos = new Set();
+    const gruposUsados = [];
+
+    const adicionar = (valor) => {
+      const email = (valor || '').trim().toLowerCase();
+      if (!email || !email.includes('@') || vistos.has(email)) return;
+      vistos.add(email);
+      emails.push(email);
+    };
+
+    tokens.forEach((token) => {
+      const grupo = grupos.find((g) => g.token.toLowerCase() === token.toLowerCase());
+
+      if (grupo) {
+        gruposUsados.push(grupo);
+        if (ensureArray(grupo.membros).length > 0) {
+          grupo.membros.forEach(adicionar);
+        } else if (grupo.tipo === 'google') {
+          // Sem membros legíveis: o próprio Google distribui aos integrantes.
+          adicionar(grupo.token);
+        }
+        return;
+      }
+
+      if (token.includes('@')) adicionar(token);
+    });
+
+    return { emails, gruposUsados };
+  };
+
+  const convidadosResolvidos = expandirConvidados(formData.attendees);
+
   useEffect(() => {
     if (editingBooking) {
       setFormData({
@@ -58,13 +148,9 @@ export default function ReservationModal({
   // Checa a disponibilidade dos convidados no Google Agenda (free/busy).
   // Roda com um pequeno atraso (debounce) sempre que mudam convidados/horário.
   useEffect(() => {
-    const parseEmails = (texto) =>
-      (texto || '')
-        .split(',')
-        .map((e) => e.trim())
-        .filter((e) => e !== '' && e.includes('@'));
-
-    const emails = parseEmails(formData.attendees);
+    // Grupos são abertos em pessoas antes da consulta: o free/busy é por
+    // agenda individual, então um token de grupo não significa nada aqui.
+    const { emails } = expandirConvidados(formData.attendees);
 
     if (emails.length === 0 || !formData.date || !formData.startTime || !formData.endTime) {
       setBusyAttendees([]);
@@ -91,7 +177,7 @@ export default function ReservationModal({
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [formData.attendees, formData.date, formData.startTime, formData.endTime, formData.userEmail]);
+  }, [formData.attendees, formData.date, formData.startTime, formData.endTime, formData.userEmail, grupos]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -133,24 +219,47 @@ export default function ReservationModal({
     const currentSearchTerm = parts[parts.length - 1].trim().toLowerCase();
 
     if (currentSearchTerm.length > 1) {
-      const matches = usersList.filter(user => 
-        user.email.toLowerCase().includes(currentSearchTerm) || 
-        user.nome.toLowerCase().includes(currentSearchTerm)
-      ).slice(0, 5); 
+      // O que já está no campo não deve reaparecer nas sugestões.
+      const jaNoCampo = new Set(
+        parts.slice(0, -1).map((t) => t.trim().toLowerCase()).filter(Boolean)
+      );
 
-      setSuggestions(matches);
+      // Grupos vêm primeiro: convidam mais gente com um clique.
+      const gruposMatch = grupos
+        .filter((g) => !jaNoCampo.has(g.token.toLowerCase()))
+        .filter((g) =>
+          g.nome.toLowerCase().includes(currentSearchTerm) ||
+          g.token.toLowerCase().includes(currentSearchTerm)
+        )
+        .slice(0, 4)
+        .map((g) => ({ kind: 'grupo', ...g }));
+
+      const pessoasMatch = pessoas
+        .filter((u) => !jaNoCampo.has(u.email.toLowerCase()))
+        .filter((u) =>
+          u.email.toLowerCase().includes(currentSearchTerm) ||
+          u.nome.toLowerCase().includes(currentSearchTerm)
+        )
+        .slice(0, 6)
+        .map((u) => ({ kind: 'pessoa', ...u }));
+
+      setSuggestions([...gruposMatch, ...pessoasMatch]);
       setShowSuggestions(true);
     } else {
       setShowSuggestions(false);
     }
   };
 
-  const selectSuggestion = (user) => {
+  const selectSuggestion = (item) => {
+    // Grupos entram como token (`grupo:<slug>` ou o e-mail do Google Group);
+    // a expansão em pessoas acontece no backend, ao salvar.
+    const valor = item.kind === 'grupo' ? item.token : item.email;
+
     const parts = formData.attendees.split(',');
-    parts.pop(); 
-    parts.push(user.email); 
-    const newValue = parts.join(', ').replace(/^, /, ''); 
-    setFormData({ ...formData, attendees: newValue + ', ' }); 
+    parts.pop();
+    parts.push(valor);
+    const newValue = parts.join(', ').replace(/^, /, '');
+    setFormData({ ...formData, attendees: newValue + ', ' });
     setShowSuggestions(false);
     document.getElementById('attendees-input').focus();
   };
@@ -175,10 +284,21 @@ export default function ReservationModal({
        promise,
        {
          loading: 'Processando reserva...',
-         success: () => {
+         success: (res) => {
              onSuccess();
              onClose();
-             return editingBooking ? 'Reserva atualizada!' : 'Reserva criada com sucesso!';
+
+             const total = res?.data?.totalConvidados || 0;
+             const naoResolvidos = ensureArray(res?.data?.naoResolvidos);
+
+             // Um token que o backend não reconheceu (grupo renomeado/excluído)
+             // não pode passar em silêncio — ninguém daquele grupo foi convidado.
+             if (naoResolvidos.length > 0) {
+               toast.error(`Não foi possível identificar: ${naoResolvidos.join(', ')}`, { duration: 6000 });
+             }
+
+             const base = editingBooking ? 'Reserva atualizada!' : 'Reserva criada com sucesso!';
+             return total > 0 ? `${base} ${total} convidado(s) notificado(s).` : base;
          },
          error: (err) => {
              // Pega a mensagem de erro do servidor
@@ -277,29 +397,72 @@ export default function ReservationModal({
                   id="attendees-input"
                   name="attendees" 
                   value={formData.attendees} 
-                  placeholder="Comece a digitar o nome ou email..." 
-                  rows="2" 
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all" 
-                  onChange={handleAttendeesChange} 
+                  placeholder="Digite um nome, e-mail ou grupo..."
+                  rows="2"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all"
+                  onChange={handleAttendeesChange}
                 />
               </div>
-              
+
               {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                  {suggestions.map((user, index) => (
-                    <div 
-                      key={index}
-                      onClick={() => selectSuggestion(user)}
-                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 flex justify-between items-center group"
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-56 overflow-y-auto">
+                  {suggestions.map((item) => (
+                    <div
+                      key={`${item.kind}-${item.kind === 'grupo' ? item.token : item.email}`}
+                      onClick={() => selectSuggestion(item)}
+                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 flex justify-between items-center gap-3 group"
                     >
-                      <div>
-                        <div className="font-bold text-gray-700 text-sm">{user.nome}</div>
-                        <div className="text-xs text-gray-500">{user.email}</div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-gray-700 text-sm flex items-center gap-1.5">
+                          {item.kind === 'grupo' && <UsersRound size={14} className="text-brand shrink-0" />}
+                          <span className="truncate">{item.nome}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {item.kind === 'grupo'
+                            ? `${item.membros?.length || 0} pessoa(s)${item.tipo === 'google' ? ` · ${item.token}` : ''}`
+                            : item.email}
+                        </div>
                       </div>
-                      <Check size={16} className="text-brand opacity-0 group-hover:opacity-100" />
+                      <div className="flex items-center gap-2 shrink-0">
+                        {item.kind === 'grupo' && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                            item.tipo === 'google'
+                              ? 'bg-blue-50 text-blue-600'
+                              : 'bg-purple-50 text-purple-600'
+                          }`}>
+                            {item.tipo === 'google' ? 'Google Group' : 'Grupo'}
+                          </span>
+                        )}
+                        <Check size={16} className="text-brand opacity-0 group-hover:opacity-100" />
+                      </div>
                     </div>
                   ))}
                 </div>
+              )}
+
+              {/* RESUMO: quantas pessoas serão convidadas de fato */}
+              {(convidadosResolvidos.gruposUsados.length > 0 || convidadosResolvidos.emails.length > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {convidadosResolvidos.gruposUsados.map((g) => (
+                    <span
+                      key={g.token}
+                      title={ensureArray(g.membros).join(', ')}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200"
+                    >
+                      <UsersRound size={11} />
+                      {g.nome} ({ensureArray(g.membros).length})
+                    </span>
+                  ))}
+                  <span className="text-xs text-gray-500">
+                    {convidadosResolvidos.emails.length} pessoa(s) serão convidadas
+                  </span>
+                </div>
+              )}
+
+              {avisoDiretorio && (
+                <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  {avisoDiretorio}
+                </p>
               )}
             </div>
 
