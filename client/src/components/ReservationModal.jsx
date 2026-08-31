@@ -8,6 +8,8 @@ import usersList from '../users.json';
 // 1. IMPORTAR O TOAST
 import toast from 'react-hot-toast';
 import TermoPdfModal from './TermoPdfModal';
+import { RESTRICTED_ROOM_ID } from '../config';
+import { responsavelDe } from '../bookingDisplay';
 
 const ID_SALAO = 'j7QOhdPRzEJcza2cMqwM';
 const TERMO_SALAO_PDF = '/termos/it-depsu-30-salao.pdf';
@@ -17,6 +19,9 @@ export default function ReservationModal({
 }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
   const isSalao = room.id === ID_SALAO;
+  // Sala restrita: só alguns e-mails podem reservá-la, e quem vai usar a sala
+  // é informado no campo Responsável.
+  const isRestrita = RESTRICTED_ROOM_ID !== '' && room.id === RESTRICTED_ROOM_ID;
   const [confirmedTerms, setConfirmedTerms] = useState(false);
   const [showTermoModal, setShowTermoModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -25,6 +30,7 @@ export default function ReservationModal({
     startTime: initialTime || '',
     endTime: initialTime ? (parseInt(initialTime.split(':')[0]) + 1).toString().padStart(2, '0') + ':00' : '',
     userEmail: currentUserEmail || '',
+    solicitanteEmail: '',
     attendees: '',
     notes: ''
   });
@@ -45,6 +51,11 @@ export default function ReservationModal({
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef(null);
+
+  // Autocomplete do campo Responsável (só existe na sala restrita).
+  const [sugestoesSolicitante, setSugestoesSolicitante] = useState([]);
+  const [mostrarSugestoesSolicitante, setMostrarSugestoesSolicitante] = useState(false);
+  const solicitanteRef = useRef(null);
 
   // Diretório da organização (pessoas) e grupos de convite disponíveis.
   const [pessoas, setPessoas] = useState([]);
@@ -142,6 +153,7 @@ export default function ReservationModal({
         startTime: editingBooking.startTime,
         endTime: editingBooking.endTime,
         userEmail: editingBooking.userEmail,
+        solicitanteEmail: editingBooking.solicitanteEmail || '',
         attendees: editingBooking.attendees || '',
         notes: editingBooking.notes || ''
       });
@@ -190,6 +202,9 @@ export default function ReservationModal({
     const handleClickOutside = (event) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(event.target)) {
         setShowSuggestions(false);
+      }
+      if (solicitanteRef.current && !solicitanteRef.current.contains(event.target)) {
+        setMostrarSugestoesSolicitante(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -257,6 +272,31 @@ export default function ReservationModal({
     }
   };
 
+  const handleSolicitanteChange = (e) => {
+    const valor = e.target.value;
+    setFormData({ ...formData, solicitanteEmail: valor });
+
+    const busca = valor.trim().toLowerCase();
+    if (busca.length < 2) {
+      setMostrarSugestoesSolicitante(false);
+      return;
+    }
+
+    setSugestoesSolicitante(
+      pessoas
+        .filter((p) =>
+          p.nome.toLowerCase().includes(busca) || p.email.toLowerCase().includes(busca)
+        )
+        .slice(0, 5)
+    );
+    setMostrarSugestoesSolicitante(true);
+  };
+
+  const selecionarSolicitante = (pessoa) => {
+    setFormData({ ...formData, solicitanteEmail: pessoa.email });
+    setMostrarSugestoesSolicitante(false);
+  };
+
   const selectSuggestion = (item) => {
     // Grupos entram como token (`grupo:<slug>` ou o e-mail do Google Group);
     // a expansão em pessoas acontece no backend, ao salvar.
@@ -277,6 +317,18 @@ export default function ReservationModal({
     if (isSalao && !confirmedTerms) {
       toast.error('Você precisa ler o termo de uso e confirmar a ciência para reservar o salão.');
       return;
+    }
+
+    if (isRestrita) {
+      const solicitante = formData.solicitanteEmail.trim();
+      if (solicitante.length === 0) {
+        toast.error('Informe quem solicitou a sala no campo Responsável.');
+        return;
+      }
+      if (!solicitante.includes('@')) {
+        toast.error('O responsável precisa ser um e-mail. Selecione uma pessoa da lista.');
+        return;
+      }
     }
 
     setLoading(true);
@@ -473,14 +525,57 @@ export default function ReservationModal({
               </div>
             )}
 
-            {/* RESPONSÁVEL */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Responsável</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-4 py-2.5 border border-gray-300 bg-gray-50 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
+            {/* RESPONSÁVEL — na sala restrita, quem reserva não é quem usa a
+                sala, então o responsável é digitado. Nas outras salas o campo
+                continua travado no usuário logado. */}
+            {isRestrita ? (
+              <div className="relative" ref={solicitanteRef}>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  Responsável — quem solicitou a sala
+                </label>
+                <div className="relative group">
+                  <Mail className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
+                  <input
+                    type="text"
+                    id="solicitante-input"
+                    name="solicitanteEmail"
+                    value={formData.solicitanteEmail}
+                    placeholder="Nome ou e-mail de quem pediu a reserva"
+                    autoComplete="off"
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all"
+                    onChange={handleSolicitanteChange}
+                  />
+                </div>
+
+                {mostrarSugestoesSolicitante && sugestoesSolicitante.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                    {sugestoesSolicitante.map((pessoa) => (
+                      <div
+                        key={pessoa.email}
+                        onClick={() => selecionarSolicitante(pessoa)}
+                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0"
+                      >
+                        <div className="font-bold text-gray-700 text-sm">{pessoa.nome}</div>
+                        <div className="text-xs text-gray-500">{pessoa.email}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Reserva feita por <strong>{formData.userEmail}</strong>. O responsável informado
+                  aparece nas telas da sala e recebe a confirmação por e-mail.
+                </p>
               </div>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Responsável</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
+                  <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-4 py-2.5 border border-gray-300 bg-gray-50 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
+                </div>
+              </div>
+            )}
 
             {/* CONVIDADOS */}
             <div className="relative" ref={suggestionsRef}>
@@ -689,7 +784,7 @@ export default function ReservationModal({
                     {slot.title || 'Sem título'}
                   </div>
                   <div className="text-[10px] text-gray-400 truncate">
-                    {slot.userEmail}
+                    {responsavelDe(slot)}
                   </div>
                 </div>
               ))

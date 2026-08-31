@@ -40,11 +40,18 @@ function buildEventResource(bookingData) {
     ? `\n\nPauta / Anotações:\n${bookingData.notes}`
     : '';
 
+  // Na sala restrita, quem reserva não é quem vai usar a sala; o evento precisa
+  // dizer isso, senão só aparece o nome de quem reservou.
+  const responsavel = bookingData.solicitanteEmail
+    ? `\nResponsável pela sala: ${bookingData.solicitanteEmail}`
+    : '';
+
   return {
     summary: displayTitle,
     description:
       `Reserva de sala criada pelo Sistema de Reservas.\n` +
       `Organizador: ${bookingData.userEmail}` +
+      responsavel +
       pauta,
     location: bookingData.roomName,
     start: {

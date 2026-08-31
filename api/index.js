@@ -57,6 +57,36 @@ function generateBookingCode() {
 const RESTRICTED_ROOM_ID = config.restrictedRoom.id; // ID da sala restrita
 const RESTRICTED_ROOM_EMAILS = config.restrictedRoom.allowedEmails; // Emails autorizados a reservar a sala restrita
 
+// --- SOLICITANTE (SALA RESTRITA) ---
+// A sala restrita só pode ser reservada pelos e-mails de RESTRICTED_ROOM_EMAILS,
+// mas quem vai USAR a sala normalmente é outra pessoa, que pediu a reserva.
+// Esse campo guarda o e-mail dela: é ele que aparece como "Responsável" nas
+// telas e recebe a confirmação. A posse da reserva continua com `userEmail`.
+const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Valida o solicitante informado. Só é aceito na sala restrita — nas outras
+ * salas quem reserva é quem usa, e um segundo responsável só confundiria.
+ * Retorna { email } ou { erro }.
+ */
+function validarSolicitante(roomId, solicitanteEmail) {
+  const email = (solicitanteEmail || '').trim().toLowerCase();
+
+  if (email.length === 0) return { email: null };
+
+  if (roomId !== RESTRICTED_ROOM_ID) {
+    // Ignora em silêncio em vez de recusar: o campo simplesmente não existe
+    // para as outras salas.
+    return { email: null };
+  }
+
+  if (!FORMATO_EMAIL.test(email)) {
+    return { erro: `"${solicitanteEmail}" não é um e-mail válido para o responsável.` };
+  }
+
+  return { email };
+}
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -143,7 +173,7 @@ app.post('/bookings', async (req, res) => {
   try {
     const {
       roomId, date, dates, startTime, endTime, userEmail, roomName,
-      attendees, title, notes, termConfirmed
+      attendees, title, notes, termConfirmed, solicitanteEmail
     } = req.body;
 
     if (!roomId || !startTime || !endTime || !userEmail) {
@@ -175,6 +205,15 @@ app.post('/bookings', async (req, res) => {
 
     if (roomId === RESTRICTED_ROOM_ID && !RESTRICTED_ROOM_EMAILS.includes(userEmail)) {
       return res.status(403).json({ error: 'Esta sala é restrita apenas à administração.' });
+    }
+
+    // Solicitante: na sala restrita, quem reserva (userEmail) não é quem vai
+    // usar a sala. `userEmail` continua sendo o dono — é ele quem edita,
+    // cancela e organiza o evento no Google — e o solicitante é quem aparece
+    // como responsável nas telas e recebe a confirmação por e-mail.
+    const solicitante = validarSolicitante(roomId, solicitanteEmail);
+    if (solicitante.erro) {
+      return res.status(400).json({ error: solicitante.erro });
     }
 
     // O horário é o mesmo em todos os dias, então basta validar uma vez.
@@ -264,6 +303,10 @@ app.post('/bookings', async (req, res) => {
         createdAt: criadoEm
       };
 
+      if (solicitante.email) {
+        novaReserva.solicitanteEmail = solicitante.email;
+      }
+
       // Campos da série só existem quando há mais de um dia, para não poluir
       // as reservas simples que são a maioria.
       if (ehSerie) {
@@ -298,9 +341,13 @@ app.post('/bookings', async (req, res) => {
     // Uma única confirmação ao organizador, listando todos os dias — não faz
     // sentido encher a caixa dele com um e-mail por dia. Os convidados recebem
     // os convites pela Google Agenda, um por dia.
+    //
+    // Havendo solicitante, ele recebe a mesma confirmação: é ele quem vai usar
+    // a sala e precisa ter o registro por escrito.
     await sendBookingConfirmationEmail({
       roomName,
       userEmail,
+      solicitanteEmail: solicitante.email,
       title: title || 'Reunião Reservada',
       notes: notes || '',
       date: datasUnicas[0],
@@ -491,7 +538,7 @@ app.delete('/bookings/:id', async (req, res) => {
 app.put('/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, startTime, endTime, attendees, title, userEmail, roomId, notes } = req.body;
+    const { date, startTime, endTime, attendees, title, userEmail, roomId, notes, solicitanteEmail } = req.body;
 
     const docRef = db.collection('bookings').doc(id);
     const doc = await docRef.get();
@@ -566,6 +613,16 @@ app.put('/bookings/:id', async (req, res) => {
       guestStatuses
     };
 
+    // Solicitante da sala restrita: se o campo não vier na requisição, mantém
+    // o que já estava gravado — só é alterado quando enviado de propósito.
+    if (solicitanteEmail !== undefined) {
+      const solicitante = validarSolicitante(targetRoomId, solicitanteEmail);
+      if (solicitante.erro) {
+        return res.status(400).json({ error: solicitante.erro });
+      }
+      updatedData.solicitanteEmail = solicitante.email || null;
+    }
+
     await docRef.update(updatedData);
 
     // Atualiza o evento no Google Agenda. Se a reserva ainda não tiver um
@@ -573,6 +630,11 @@ app.put('/bookings/:id', async (req, res) => {
     const dadosEvento = {
       ...updatedData,
       userEmail: currentData.userEmail,
+      // Sem isto, editar sem mexer no responsável apagaria o nome dele da
+      // descrição do evento no Google.
+      solicitanteEmail: updatedData.solicitanteEmail !== undefined
+        ? updatedData.solicitanteEmail
+        : currentData.solicitanteEmail,
       attendeesList,
       googleEventId: currentData.googleEventId,
       googleCalendarId: currentData.googleCalendarId

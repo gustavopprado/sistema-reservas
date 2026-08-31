@@ -50,6 +50,19 @@ async function sendBookingConfirmationEmail(bookingData) {
        <p style="white-space: pre-wrap; background:#f8fafc; border:1px solid #e2e8f0; padding:10px; border-radius:6px; color:#334155;">${bookingData.notes}</p>`
     : '';
 
+  // Na sala restrita, quem reserva não é quem vai usar a sala. O solicitante
+  // recebe a mesma confirmação, e o e-mail deixa claro quem reservou por ele.
+  const solicitante = (bookingData.solicitanteEmail || '').trim();
+
+  const destinatarios = solicitante
+    ? [bookingData.userEmail, solicitante].join(', ')
+    : bookingData.userEmail;
+
+  const blocoResponsavel = solicitante
+    ? `<p><strong>Responsável pela sala:</strong> ${solicitante}</p>
+       <p style="font-size:12px; color:#666;">Reserva feita por ${bookingData.userEmail} a pedido de ${solicitante}.</p>`
+    : '';
+
   const linkBloco = bookingData.googleEventLink
     ? `<p style="margin-top:16px;"><a href="${bookingData.googleEventLink}" style="background-color:#2563eb; color:white; padding:10px 20px; text-decoration:none; border-radius:6px; font-weight:bold; display:inline-block;">Ver na Google Agenda</a></p>`
     : '';
@@ -57,7 +70,7 @@ async function sendBookingConfirmationEmail(bookingData) {
   try {
     await transporter.sendMail({
       from: FROM_ROOMS,
-      to: bookingData.userEmail,
+      to: destinatarios,
       subject: ehSerie
         ? `Reserva confirmada: ${displayTitle} - ${datas.length} dias a partir de ${dataFmt}`
         : `Reserva confirmada: ${displayTitle} - ${dataFmt} às ${bookingData.startTime}`,
@@ -67,6 +80,7 @@ async function sendBookingConfirmationEmail(bookingData) {
           <p>Sua reserva foi criada com sucesso. Os convidados foram notificados pela Google Agenda e o evento já aparece na agenda deles${ehSerie ? ' — um convite para cada dia' : ''}.</p>
           <p><strong>Título:</strong> ${displayTitle}</p>
           <p><strong>Sala:</strong> ${bookingData.roomName}</p>
+          ${blocoResponsavel}
           ${blocoDatas}
           <p><strong>Horário:</strong> ${bookingData.startTime} - ${bookingData.endTime}${ehSerie ? ' (em todos os dias)' : ''}</p>
           <p><strong>Convidados:</strong> ${convidados}</p>

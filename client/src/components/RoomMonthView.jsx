@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import { ChevronLeft, ChevronRight, CalendarDays, User, Clock } from 'lucide-react';
+import { responsavelDe, temSolicitante } from '../bookingDisplay';
 
 export default function RoomMonthView({ rooms }) {
   const ensureArray = (v) => Array.isArray(v) ? v : [];
@@ -170,7 +171,8 @@ export default function RoomMonthView({ rooms }) {
                           dayBookings.map(b => (
                             <div
                               key={b.id}
-                              title={`${b.title || 'Reserva'} — ${b.userEmail}\n${b.startTime}–${b.endTime}`}
+                              title={`${b.title || 'Reserva'} — ${responsavelDe(b)}\n${b.startTime}–${b.endTime}` +
+                                (temSolicitante(b) ? `\nReservado por: ${b.userEmail}` : '')}
                               className="bg-red-50 border border-red-200 rounded px-1.5 py-0.5 text-[10px] leading-tight overflow-hidden"
                             >
                               <div className="font-bold text-red-700 truncate">{b.title || 'Reserva'}</div>
@@ -178,7 +180,7 @@ export default function RoomMonthView({ rooms }) {
                                 <Clock size={9}/> {b.startTime}–{b.endTime}
                               </div>
                               <div className="text-red-400 flex items-center gap-0.5 truncate">
-                                <User size={9}/> {b.userEmail.split('@')[0]}
+                                <User size={9}/> {responsavelDe(b).split('@')[0]}
                               </div>
                             </div>
                           ))

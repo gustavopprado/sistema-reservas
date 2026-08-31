@@ -97,6 +97,7 @@ sistema-reservas/
         ├── users.example.json  # Modelo do diretório local (versionado)
         ├── users.json          # Fallback do autocomplete (NÃO versionado)
         ├── api.js              # Instância configurada do Axios
+        ├── bookingDisplay.js   # Regras de apresentação de uma reserva (responsável)
         ├── firebase-config.js  # Configuração do Firebase Client SDK
         ├── main.jsx            # Entry point do Vite
         ├── App.jsx             # Roteamento entre Hub / Salas / Veículos
@@ -170,7 +171,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - Não é permitido criar reservas em horários já ocupados (verificação de overlap no backend, em **todos** os dias da reserva antes de gravar qualquer um).
 - Não é permitido agendar no passado (tolerância de 10 minutos).
 - O horário final deve ser posterior ao inicial.
-- A **Sala Restrita** só pode ser reservada pelos e-mails listados em `RESTRICTED_ROOM_EMAILS`.
+- A **Sala Restrita** só pode ser reservada pelos e-mails listados em `RESTRICTED_ROOM_EMAILS`. Nela, o campo *Responsável* é digitado: quem reserva informa **quem pediu a sala** (`solicitanteEmail`), e é esse e-mail que aparece nas telas de visualização e recebe a confirmação. A posse da reserva — editar, cancelar, organizar o evento no Google — continua com quem reservou.
 
 ---
 
@@ -242,7 +243,7 @@ Os convidados **não** recebem e-mail do sistema: eles são convidados pelo pró
 
 | Evento | Quem o sistema notifica | Quem o Google notifica |
 |---|---|---|
-| Criação de reserva | Organizador — 1 e-mail de confirmação (numa reserva de vários dias, um único e-mail listando todos os dias) | Convidados — 1 convite por dia |
+| Criação de reserva | Organizador e, na sala restrita, também o responsável informado — 1 e-mail de confirmação (numa reserva de vários dias, um único e-mail listando todos os dias) | Convidados — 1 convite por dia |
 | Edição de reserva | Ninguém | Convidados — atualização do evento |
 | Cancelamento | Ninguém | Convidados — cancelamento, removendo da agenda |
 
@@ -383,7 +384,7 @@ A lista de pessoas e grupos fica em memória por `DIRECTORY_CACHE_TTL_MINUTES` (
 | Coleção | Descrição |
 |---|---|
 | `rooms` | Salas de reunião cadastradas (nome, capacidade, localização, equipamentos) |
-| `bookings` | Reservas de sala (data, horário, organizador, convidados, status RSVP). Uma reserva de vários dias vira **um documento por dia**, unidos por `serieId` + `serieDatas` |
+| `bookings` | Reservas de sala (data, horário, organizador, convidados, status RSVP). Uma reserva de vários dias vira **um documento por dia**, unidos por `serieId` + `serieDatas`. `solicitanteEmail` guarda quem pediu a sala restrita |
 | `cars` | Veículos cadastrados (modelo, placa, categoria, KM atual) |
 | `car_bookings` | Reservas de veículo (período, destino, status, KM, código `VEI-`) |
 | `car_costs` | Custos registrados por veículo (combustível, manutenção, multa, etc.) |

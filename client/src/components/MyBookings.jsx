@@ -14,6 +14,7 @@ import {
   CalendarDays
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { temSolicitante } from '../bookingDisplay';
 
 export default function MyBookings({ userEmail, onEdit }) {
   const ensureArray = (value) => (Array.isArray(value) ? value : []);
@@ -277,6 +278,13 @@ export default function MyBookings({ userEmail, onEdit }) {
                     <span className="text-xs text-gray-500 mr-2">Seu status:</span>
                     {getGuestStatusBadge(booking.myGuestStatus)}
                   </div>
+                )}
+
+                {temSolicitante(booking) && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Responsável pela sala: <strong>{booking.solicitanteEmail}</strong>
+                    {booking.isOwner && ' (reserva feita por você)'}
+                  </p>
                 )}
 
                 {booking.attendees && (
