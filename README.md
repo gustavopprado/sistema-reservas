@@ -148,7 +148,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - **Agenda Diária** — linha do tempo visual com os blocos ocupados de cada sala no dia selecionado. Clique em um horário vazio abre o modal de reserva já preenchido.
 - **Visão Mensal** — calendário mensal por sala, destacando os dias com reservas.
 - **Criar Reserva** — formulário com título, data, horário de início/fim e lista de convidados (separados por vírgula). Validação de conflito em tempo real antes de salvar.
-- **Reserva de vários dias** — a mesma sala, no mesmo horário, em vários dias (seguidos ou espalhados). O seletor traz atalhos (`+2 dias seguidos`, `+4 dias úteis`, `+3 semanas`) e um calendário do mês em que os dias já ocupados naquele horário aparecem bloqueados. Os atalhos **pulam** os dias ocupados e seguem até completar a quantidade pedida.
+- **Reserva de vários dias** — a mesma sala, no mesmo horário, em vários dias (seguidos ou espalhados). Basta clicar nos dias no calendário do mês, em que os dias já ocupados naquele horário aparecem bloqueados.
 
   Cada dia gera **um evento e um convite próprios** no Google Calendar, então cada dia pode ser aceito, recusado ou remarcado de forma independente. O organizador recebe **um único e-mail** listando todos os dias.
 

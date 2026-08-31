@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, X, CalendarPlus, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Info } from 'lucide-react';
 import api from '../api';
 
 // Seletor dos dias extras de uma reserva. A "primeira data" continua sendo o
@@ -49,10 +49,6 @@ export default function MultiDatePicker({
   const [mesVisivel, setMesVisivel] = useState(() => (primaryDate || hojeISO()).slice(0, 7));
   const [reservasPorMes, setReservasPorMes] = useState({});
   const [carregandoMes, setCarregandoMes] = useState(false);
-
-  // Dias que um atalho pulou por estarem ocupados — o usuário precisa saber
-  // que "+4 dias seguidos" não caiu nos 4 dias seguidos do calendário.
-  const [diasPulados, setDiasPulados] = useState([]);
 
   const temHorario = Boolean(startTime && endTime && startTime < endTime);
 
@@ -125,80 +121,14 @@ export default function MultiDatePicker({
     }
   };
 
-  /**
-   * Adiciona uma sequência de dias a partir da primeira data.
-   *
-   * Dias em que a sala já está ocupada são PULADOS, e a busca continua até
-   * completar a quantidade pedida: "+4 dias seguidos" entrega 4 dias que dão
-   * para reservar, não 4 casas no calendário — se um deles fosse recusado, o
-   * servidor rejeitaria a série inteira.
-   *
-   * Meses ainda não carregados não têm ocupação conhecida; nesse caso o dia
-   * entra e a validação do servidor continua sendo a palavra final.
-   */
-  const adicionarSequencia = (quantidade, passo, apenasDiasUteis = false) => {
-    if (!primaryDate) return;
-
-    const novas = [];
-    const pulados = [];
-    let cursor = primaryDate;
-    let tentativas = 0;
-
-    while (novas.length < quantidade && tentativas < 200) {
-      tentativas += 1;
-      cursor = somarDias(cursor, passo);
-
-      if (apenasDiasUteis) {
-        const diaSemana = paraData(cursor).getDay();
-        if (diaSemana === 0 || diaSemana === 6) continue;
-      }
-
-      if (cursor === primaryDate || selecionadas.includes(cursor)) continue;
-
-      if (cursor < hoje) continue;
-
-      if (ocupacaoDoDia(cursor)) {
-        pulados.push(cursor);
-        continue;
-      }
-
-      novas.push(cursor);
-    }
-
-    setDiasPulados(pulados);
-    onChange([...selecionadas, ...novas].sort());
-  };
-
-  const removerTodas = () => {
-    setDiasPulados([]);
-    onChange([]);
-  };
-
-  const PRESETS = [
-    { rotulo: '+2 dias seguidos', acao: () => adicionarSequencia(2, 1) },
-    { rotulo: '+4 dias seguidos', acao: () => adicionarSequencia(4, 1) },
-    { rotulo: '+4 dias úteis', acao: () => adicionarSequencia(4, 1, true) },
-    { rotulo: '+3 semanas', acao: () => adicionarSequencia(3, 7) },
-  ];
+  const removerTodas = () => onChange([]);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-      {/* Atalhos */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <span className="text-xs font-semibold text-gray-600 flex items-center gap-1">
-          <CalendarPlus size={13} /> Atalhos:
+        <span className="text-xs font-semibold text-gray-600">
+          Clique nos dias em que a sala também será usada:
         </span>
-        {PRESETS.map(({ rotulo, acao }) => (
-          <button
-            key={rotulo}
-            type="button"
-            onClick={acao}
-            disabled={!primaryDate}
-            className="text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-300 bg-white text-gray-700 hover:border-brand hover:text-brand transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {rotulo}
-          </button>
-        ))}
         {selecionadas.length > 0 && (
           <button
             type="button"
@@ -214,16 +144,6 @@ export default function MultiDatePicker({
         <p className="flex items-start gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
           <Info size={13} className="mt-0.5 shrink-0" />
           Preencha o horário de início e fim para ver quais dias estão livres.
-        </p>
-      )}
-
-      {diasPulados.length > 0 && (
-        <p className="flex items-start gap-1.5 text-[11px] text-gray-600 bg-white border border-gray-200 rounded px-2 py-1.5 mb-3">
-          <Info size={13} className="mt-0.5 shrink-0 text-brand" />
-          <span>
-            A sala já estava ocupada em {diasPulados.map(formatarBR).join(', ')} —
-            esses dias foram pulados e substituídos pelos próximos livres.
-          </span>
         </p>
       )}
 
