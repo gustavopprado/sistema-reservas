@@ -22,7 +22,8 @@ const {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
-  getFreeBusy
+  getFreeBusy,
+  getEventAttendees
 } = require('./calendarService');
 const directory = require('./directoryService');
 const emailGroups = require('./emailGroups');
@@ -799,6 +800,81 @@ app.get('/bookings/admin', async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar reservas (admin):', error);
     res.status(500).json({ error: 'Erro interno.' });
+  }
+});
+
+// ROTA: Situação de cada convidado de uma reserva.
+//
+// A fonte principal é o próprio evento no Google Calendar, porque é lá que
+// cai a resposta de quem clicou "Sim/Não" no convite que chegou por e-mail.
+// O RSVP feito dentro do sistema (guestStatuses) entra como complemento, para
+// quem respondeu pela tela e ainda não apareceu no evento.
+app.get('/bookings/:id/convidados', requireAuth, async (req, res) => {
+  try {
+    const doc = await db.collection('bookings').doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Reserva não encontrada.' });
+
+    const reserva = doc.data();
+    const solicitante = req.authUser.email;
+    const convidados = Array.isArray(reserva.convidados) ? reserva.convidados : [];
+
+    // Só quem participa da reserva (ou um admin) pode ver a lista de respostas.
+    const admins = [config.admin.roomsAdmin, config.admin.bookingsReportAdmin].filter(Boolean);
+    const podeVer =
+      reserva.userEmail === solicitante ||
+      reserva.solicitanteEmail === solicitante ||
+      convidados.includes(solicitante) ||
+      admins.includes(solicitante);
+
+    if (!podeVer) {
+      return res.status(403).json({ error: 'Você não participa desta reserva.' });
+    }
+
+    const statusLocal = reserva.guestStatuses || {};
+
+    const doGoogle = await getEventAttendees(
+      reserva.googleCalendarId || reserva.userEmail,
+      reserva.googleEventId
+    );
+
+    const porEmailNoGoogle = new Map();
+    if (doGoogle) {
+      doGoogle
+        .filter((pessoa) => !pessoa.organizador)
+        .forEach((pessoa) => porEmailNoGoogle.set(pessoa.email, pessoa.resposta));
+    }
+
+    const lista = convidados.map((email) => {
+      const respostaGoogle = porEmailNoGoogle.get(email.toLowerCase());
+
+      if (respostaGoogle) {
+        return { email, status: respostaGoogle, origem: 'google' };
+      }
+
+      const local = statusLocal[email];
+      if (local && local !== 'pendente') {
+        return { email, status: local, origem: 'sistema' };
+      }
+
+      return { email, status: 'pendente', origem: doGoogle ? 'google' : 'sistema' };
+    });
+
+    const contagem = lista.reduce((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      convidados: lista,
+      contagem,
+      // Avisa a tela quando não deu para ler o evento, para ela não apresentar
+      // "pendente" como se fosse uma resposta confirmada.
+      googleDisponivel: doGoogle !== null,
+      temEvento: Boolean(reserva.googleEventId)
+    });
+  } catch (error) {
+    console.error('Erro ao consultar situação dos convidados:', error);
+    res.status(500).json({ error: 'Erro ao consultar a situação dos convidados.' });
   }
 });
 

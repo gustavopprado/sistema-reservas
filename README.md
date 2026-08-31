@@ -163,6 +163,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - **Editar Reserva** — altera horário, data e convidados. O evento do Google é atualizado e o próprio Google notifica os participantes. Numa reserva de vários dias, a edição vale **só para o dia aberto**.
 - **Cancelar Reserva** — remove a reserva e apaga o evento do Google, que retira o compromisso da agenda dos convidados. Numa reserva de vários dias é possível cancelar só um dia ou todos os dias futuros de uma vez.
 - **Minhas Reservas** — lista as reservas do usuário (como organizador) e convites recebidos (como convidado). Permite responder ao convite (RSVP) com aceitar ou recusar. Dias de uma reserva de vários dias aparecem marcados como "Dia 2 de 5".
+- **Quem aceitou o convite** — ao expandir *Detalhes*, a reserva mostra a resposta de cada convidado (aceito, recusado, talvez, sem resposta) e um resumo do tipo "3 aceitou · 1 recusou". A resposta vem do **evento no Google Calendar**, que é onde cai o clique de quem respondeu ao convite pelo Gmail ou pela Agenda — o RSVP feito na tela do sistema entra apenas como complemento, marcado como *pelo sistema*. Consultado sob demanda, ao expandir, para não gerar uma chamada ao Google por linha da lista.
 - **Painel de Histórico** — consulta completa de reservas com filtros por período, sala e usuário (restrito ao admin definido em `ADMIN_BOOKINGS_EMAIL`).
 - **Painel de Grupos de E-mail** — na mesma tela do histórico, aba *Grupos de E-mail*: cria, edita e exclui grupos do painel, lista os Google Groups da organização e mostra o diagnóstico da integração com o Workspace (quantas pessoas e grupos foram sincronizados, ou exatamente o que falta configurar).
 
@@ -444,6 +445,7 @@ Pontos que ainda precisam ser endereçados:
 | `PUT` | `/bookings/:id` | Edita reserva |
 | `PUT` | `/bookings/:id/rsvp` | Responde convite (`aceito`, `recusado`, `pendente`) |
 | `DELETE` | `/bookings/:id` | Cancela reserva. `escopo=serie` cancela todos os dias futuros da série |
+| `GET` | `/bookings/:id/convidados` | Resposta de cada convidado, lida do evento no Google (exige ID Token) |
 
 ### Diretório e grupos de convidados
 

@@ -195,10 +195,57 @@ async function getFreeBusy(requesterEmail, emails, timeMin, timeMax) {
   }
 }
 
+/**
+ * Lê a resposta de cada convidado direto do evento no Google Calendar.
+ *
+ * É a única fonte que sabe quem aceitou pelo convite que chegou por e-mail —
+ * o RSVP feito dentro do sistema grava apenas no Firestore, e a maioria das
+ * pessoas responde pelo Gmail/Agenda, não pela tela.
+ *
+ * Retorna [{ email, resposta, organizador }] com `resposta` em:
+ * 'aceito' | 'recusado' | 'talvez' | 'pendente'.
+ * Devolve null se o evento não puder ser lido (evento apagado, delegação fora
+ * do ar), para o chamador saber que não há dado em vez de assumir "pendente".
+ */
+async function getEventAttendees(organizerEmail, eventId) {
+  if (!eventId) return null;
+
+  // Traducao dos valores da API do Google.
+  const RESPOSTAS = {
+    accepted: 'aceito',
+    declined: 'recusado',
+    tentative: 'talvez',
+    needsAction: 'pendente',
+  };
+
+  try {
+    const authClient = getAuthClient(organizerEmail);
+    const calendar = google.calendar({ version: 'v3', auth: authClient });
+
+    const response = await calendar.events.get({
+      calendarId: 'primary',
+      eventId,
+    });
+
+    const attendees = Array.isArray(response.data.attendees) ? response.data.attendees : [];
+
+    return attendees.map((pessoa) => ({
+      email: (pessoa.email || '').toLowerCase(),
+      resposta: RESPOSTAS[pessoa.responseStatus] || 'pendente',
+      organizador: pessoa.organizer === true,
+    }));
+  } catch (error) {
+    console.error('❌ Erro ao ler respostas do evento no Google Calendar:', error.message);
+    if (error.response) console.error(error.response.data);
+    return null;
+  }
+}
+
 module.exports = {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
   getFreeBusy,
+  getEventAttendees,
   SHARED_CALENDAR_ID,
 };

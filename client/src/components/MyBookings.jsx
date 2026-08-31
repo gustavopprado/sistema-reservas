@@ -24,6 +24,36 @@ export default function MyBookings({ userEmail, onEdit }) {
   const [expandedBookingId, setExpandedBookingId] = useState(null);
   const [rsvpLoadingId, setRsvpLoadingId] = useState(null);
 
+  // Situação real de cada convidado, lida do evento no Google Calendar.
+  // Buscada só quando a reserva é expandida: são dados por reserva, e carregar
+  // tudo de uma vez daria uma chamada ao Google por linha da lista.
+  const [situacaoPorReserva, setSituacaoPorReserva] = useState({});
+  const [carregandoSituacao, setCarregandoSituacao] = useState(null);
+
+  const buscarSituacao = async (bookingId) => {
+    if (situacaoPorReserva[bookingId]) return;
+
+    setCarregandoSituacao(bookingId);
+    try {
+      const res = await api.get(`/bookings/${bookingId}/convidados`);
+      setSituacaoPorReserva((prev) => ({ ...prev, [bookingId]: res.data }));
+    } catch (err) {
+      console.error('Erro ao buscar situação dos convidados:', err);
+      setSituacaoPorReserva((prev) => ({
+        ...prev,
+        [bookingId]: { erro: err.response?.data?.error || 'Não foi possível ler as respostas.' }
+      }));
+    } finally {
+      setCarregandoSituacao(null);
+    }
+  };
+
+  const alternarDetalhes = (bookingId) => {
+    const abrindo = expandedBookingId !== bookingId;
+    setExpandedBookingId(abrindo ? bookingId : null);
+    if (abrindo) buscarSituacao(bookingId);
+  };
+
   useEffect(() => {
     fetchMyBookings();
   }, [userEmail]);
@@ -172,10 +202,18 @@ export default function MyBookings({ userEmail, onEdit }) {
             Recusado
           </span>
         );
+      // "Talvez" só chega da Google Agenda: o RSVP da tela do sistema não
+      // oferece essa opção.
+      case 'talvez':
+        return (
+          <span className="text-xs font-bold px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+            Talvez
+          </span>
+        );
       default:
         return (
           <span className="text-xs font-bold px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">
-            Pendente
+            Sem resposta
           </span>
         );
     }
@@ -295,25 +333,105 @@ export default function MyBookings({ userEmail, onEdit }) {
 
                 {expandedBookingId === booking.id && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
-                    <h4 className="text-sm font-bold text-gray-700 mb-3">Convidados</h4>
+                    {(() => {
+                      const situacao = situacaoPorReserva[booking.id];
+                      const carregando = carregandoSituacao === booking.id;
+                      const convidadosLocais = ensureArray(booking.convidados);
 
-                    {Array.isArray(booking.convidados) && booking.convidados.length > 0 ? (
-                      <div className="space-y-2">
-                        {booking.convidados.map((guestEmail) => (
-                          <div
-                            key={guestEmail}
-                            className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg"
-                          >
-                            <span className="text-sm text-gray-700">{guestEmail}</span>
-                            {getGuestStatusBadge(
-                              booking.guestStatuses?.[guestEmail] || 'pendente'
+                      if (convidadosLocais.length === 0) {
+                        return <p className="text-sm text-gray-500">Nenhum convidado.</p>;
+                      }
+
+                      // Enquanto o Google não responde, mostra a lista com o
+                      // que já se sabe, para a tela não ficar vazia.
+                      const lista = situacao?.convidados
+                        || convidadosLocais.map((email) => ({
+                          email,
+                          status: booking.guestStatuses?.[email] || 'pendente',
+                          origem: 'sistema'
+                        }));
+
+                      const contagem = situacao?.contagem || {};
+
+                      return (
+                        <>
+                          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                            <h4 className="text-sm font-bold text-gray-700">
+                              Convidados ({lista.length})
+                            </h4>
+
+                            {carregando ? (
+                              <span className="text-xs text-gray-400 flex items-center gap-1.5">
+                                <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-brand"></span>
+                                Consultando respostas na Google Agenda...
+                              </span>
+                            ) : situacao && !situacao.erro && (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {contagem.aceito > 0 && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                                    {contagem.aceito} aceitou
+                                  </span>
+                                )}
+                                {contagem.talvez > 0 && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                    {contagem.talvez} talvez
+                                  </span>
+                                )}
+                                {contagem.recusado > 0 && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                    {contagem.recusado} recusou
+                                  </span>
+                                )}
+                                {contagem.pendente > 0 && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+                                    {contagem.pendente} sem resposta
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500">Nenhum convidado.</p>
-                    )}
+
+                          <div className="space-y-2">
+                            {lista.map((item) => (
+                              <div
+                                key={item.email}
+                                className="flex items-center justify-between gap-3 bg-gray-50 px-3 py-2 rounded-lg"
+                              >
+                                <span className="text-sm text-gray-700 truncate">{item.email}</span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {item.origem === 'sistema' && situacao && !situacao.erro && item.status !== 'pendente' && (
+                                    <span className="text-[10px] text-gray-400" title="Respondeu pela tela do sistema, não pelo convite do Google">
+                                      pelo sistema
+                                    </span>
+                                  )}
+                                  {getGuestStatusBadge(item.status)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {situacao?.erro && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-3">
+                              {situacao.erro}
+                            </p>
+                          )}
+
+                          {situacao && !situacao.erro && !situacao.temEvento && (
+                            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 mt-3">
+                              Esta reserva não tem evento vinculado na Google Agenda, então não há
+                              respostas de convite para mostrar.
+                            </p>
+                          )}
+
+                          {situacao && !situacao.erro && situacao.temEvento && !situacao.googleDisponivel && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-3">
+                              Não foi possível ler as respostas na Google Agenda agora. Os status
+                              abaixo podem estar desatualizados.
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -363,11 +481,7 @@ export default function MyBookings({ userEmail, onEdit }) {
 
                 {(booking.isOwner || booking.isGuest) && (
                   <button
-                    onClick={() =>
-                      setExpandedBookingId(
-                        expandedBookingId === booking.id ? null : booking.id
-                      )
-                    }
+                    onClick={() => alternarDetalhes(booking.id)}
                     className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg transition-colors text-sm font-bold"
                   >
                     <Users size={16} />
