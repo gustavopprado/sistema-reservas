@@ -44,7 +44,7 @@ Veja a seção [Segurança](#-segurança) para os detalhes.
 - **Firebase Admin SDK** — acesso ao Firestore (banco de dados)
 - **node-cron** — robôs automáticos de lembrete (a cada 15 min e por hora)
 - **Nodemailer** — envio de e-mails via Gmail SMTP
-- **ical-generator** — convites `.ics` compatíveis com Outlook, Google Calendar e Apple Calendar
+- **ical-generator** — dependência declarada, porém **não utilizada**: os convites são entregues pelo próprio Google Calendar, não por anexo `.ics`
 - **googleapis** — eventos na agenda corporativa e leitura do diretório do Workspace (Admin SDK) via Service Account
 - **dotenv** — carregamento da configuração de ambiente
 
@@ -98,6 +98,7 @@ sistema-reservas/
         ├── users.json          # Fallback do autocomplete (NÃO versionado)
         ├── api.js              # Instância configurada do Axios
         ├── firebase-config.js  # Configuração do Firebase Client SDK
+        ├── main.jsx            # Entry point do Vite
         ├── App.jsx             # Roteamento entre Hub / Salas / Veículos
         └── components/
             ├── HubSelection.jsx            # Tela inicial de seleção de módulo
@@ -158,9 +159,9 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
   - **Google Groups** — os grupos reais da organização, referenciados pelo próprio e-mail do grupo. Somente leitura; os membros são gerenciados no Admin Console do Google.
 
   Em ambos os casos a expansão em pessoas acontece **no backend**, na hora de salvar. Isso mantém o free/busy e o RSVP funcionando por pessoa, e faz com que editar uma reserva antiga reexpanda o grupo com os membros **atuais**.
-- **Editar Reserva** — altera horário, data e convidados. Envia e-mail de atualização automaticamente para todos os participantes.
-- **Cancelar Reserva** — remove a reserva e envia e-mail de cancelamento com evento iCal para retirar o compromisso da agenda dos convidados.
-- **Minhas Reservas** — lista as reservas do usuário (como organizador) e convites recebidos (como convidado). Permite responder ao convite (RSVP) com aceitar ou recusar.
+- **Editar Reserva** — altera horário, data e convidados. O evento do Google é atualizado e o próprio Google notifica os participantes. Numa reserva de vários dias, a edição vale **só para o dia aberto**.
+- **Cancelar Reserva** — remove a reserva e apaga o evento do Google, que retira o compromisso da agenda dos convidados. Numa reserva de vários dias é possível cancelar só um dia ou todos os dias futuros de uma vez.
+- **Minhas Reservas** — lista as reservas do usuário (como organizador) e convites recebidos (como convidado). Permite responder ao convite (RSVP) com aceitar ou recusar. Dias de uma reserva de vários dias aparecem marcados como "Dia 2 de 5".
 - **Painel de Histórico** — consulta completa de reservas com filtros por período, sala e usuário (restrito ao admin definido em `ADMIN_BOOKINGS_EMAIL`).
 - **Painel de Grupos de E-mail** — na mesma tela do histórico, aba *Grupos de E-mail*: cria, edita e exclui grupos do painel, lista os Google Groups da organização e mostra o diagnóstico da integração com o Workspace (quantas pessoas e grupos foram sincronizados, ou exatamente o que falta configurar).
 
@@ -216,7 +217,9 @@ Os perfis são definidos por variáveis de ambiente — nenhum e-mail fica escri
 |---|---|---|
 | **Usuário comum** | Qualquer autenticado | Visualizar salas, criar reservas, editar/cancelar apenas as próprias |
 | **Admin de salas** | `ADMIN_EMAIL` | Tudo acima + reservar Sala Restrita + editar/cancelar reservas de qualquer usuário |
-| **Admin do histórico** | `ADMIN_BOOKINGS_EMAIL` | Acesso ao painel de histórico completo |
+| **Admin do histórico** | `ADMIN_BOOKINGS_EMAIL` | Acesso ao painel de histórico completo e à aba *Grupos de E-mail* |
+
+Os grupos de convidados podem ser criados e editados por qualquer um dos dois admins (`ADMIN_EMAIL` ou `ADMIN_BOOKINGS_EMAIL`) — validado no backend pelo middleware `requireAdmin`.
 
 ### Módulo: Veículos Corporativos
 
@@ -225,7 +228,7 @@ Os perfis são definidos por variáveis de ambiente — nenhum e-mail fica escri
 | **Usuário comum** | Qualquer autenticado | Visualizar frota, reservar, devolver, ver suas viagens, regularizar uso |
 | **Admin (Suprimentos)** | `VITE_FLEET_ADMIN_EMAILS` | Tudo acima + Painel Suprimentos completo |
 
-> **Atenção:** hoje a checagem de perfil acontece no frontend, e as rotas da API não exigem autenticação. Ver [Limitações conhecidas](#limitações-conhecidas).
+> **Atenção:** as rotas de diretório e grupos (`/directory/*`, `/admin/email-groups`) validam o ID Token do Firebase no backend. **Todas as outras** continuam checando o perfil apenas no frontend e aceitam qualquer chamada. Ver [Limitações conhecidas](#limitações-conhecidas).
 
 ---
 
@@ -235,13 +238,13 @@ Todos os e-mails são enviados a partir da conta configurada em `GMAIL_USER`, vi
 
 ### Salas de Reunião
 
-| Evento | Destinatários | Tipo de e-mail |
-|---|---|---|
-| Criação de reserva | Organizador + convidados | Convite com arquivo `invite.ics` (método `REQUEST`). Reserva de vários dias: um convite por dia aos convidados, um único e-mail-resumo ao organizador |
-| Edição de reserva | Organizador + convidados | Convite atualizado (SEQUENCE incrementada) |
-| Cancelamento | Organizador + convidados | Cancelamento iCal (método `CANCEL`) — remove da agenda |
+Os convidados **não** recebem e-mail do sistema: eles são convidados pelo próprio Google Calendar, porque o evento é criado com `sendUpdates: 'all'`. Assim o compromisso entra, muda de horário e sai da agenda deles automaticamente, com o RSVP nativo do Google.
 
-O arquivo `.ics` permite adicionar ou remover o evento diretamente no Outlook, Google Calendar ou Apple Calendar com um único clique.
+| Evento | Quem o sistema notifica | Quem o Google notifica |
+|---|---|---|
+| Criação de reserva | Organizador — 1 e-mail de confirmação (numa reserva de vários dias, um único e-mail listando todos os dias) | Convidados — 1 convite por dia |
+| Edição de reserva | Ninguém | Convidados — atualização do evento |
+| Cancelamento | Ninguém | Convidados — cancelamento, removendo da agenda |
 
 ### Veículos Corporativos
 
@@ -288,6 +291,8 @@ Preencha o `.env` e coloque o arquivo `serviceAccountKey.json` na pasta `api/` (
 ```bash
 npm run dev
 ```
+
+O autocomplete de convidados e os Google Groups exigem configuração extra no Google (Admin SDK + escopos na Delegação em Todo o Domínio) — ver [Integração com o Google Workspace](#-integração-com-o-google-workspace). Sem ela a API sobe normalmente e o autocomplete usa o `users.json` local.
 
 ### Frontend
 
@@ -478,6 +483,12 @@ Estas rotas exigem um **ID Token do Firebase** no header `Authorization: Bearer 
 | `POST` | `/car_costs` | Registra novo custo |
 | `PUT` | `/car_costs/:id` | Edita custo |
 | `DELETE` | `/car_costs/:id` | Exclui custo |
+
+### Diagnóstico
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/teste` | Health check — responde texto puro para confirmar que a API está no ar |
 
 ---
 
