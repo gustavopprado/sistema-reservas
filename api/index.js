@@ -30,6 +30,21 @@ const emailGroups = require('./emailGroups');
 // --- CONSTANTES DE ADMINISTRAÇÃO ---
 const ADMIN_EMAIL = config.admin.roomsAdmin;
 
+// --- RESERVAS DE VÁRIOS DIAS ---
+// Uma reserva pode cobrir vários dias no mesmo horário. Cada dia é um
+// documento próprio na coleção `bookings`, com seu próprio evento no Google
+// Calendar; os documentos de uma mesma solicitação compartilham um `serieId`.
+const FORMATO_DATA = /^\d{4}-\d{2}-\d{2}$/;
+
+// Teto por reserva. Cada dia consome uma chamada de criação de evento no
+// Google, então uma série gigante seria lenta e fácil de criar por engano.
+const MAX_DATAS_SERIE = 30;
+
+/** '2026-09-15' -> '15/09/2026' (para mensagens de erro legíveis). */
+function formatarDataBR(data) {
+  return (data || '').split('-').reverse().join('/');
+}
+
 // --- GERADOR DE ID ÚNICO DE RESERVA ---
 function generateBookingCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -126,51 +141,97 @@ app.get('/rooms', async (req, res) => {
 // ROTA 2: Criar Reserva (POST)
 app.post('/bookings', async (req, res) => {
   try {
-    const { roomId, date, startTime, endTime, userEmail, roomName, attendees, title, notes, termConfirmed } = req.body;
+    const {
+      roomId, date, dates, startTime, endTime, userEmail, roomName,
+      attendees, title, notes, termConfirmed
+    } = req.body;
 
-    if (!roomId || !date || !startTime || !endTime || !userEmail) {
+    if (!roomId || !startTime || !endTime || !userEmail) {
       return res.status(400).json({ error: 'Campos obrigatórios faltando.' });
+    }
+
+    // Aceita `date` (uma data) e/ou `dates` (várias). Uma reserva de vários
+    // dias é gravada como N documentos independentes — um por dia — unidos por
+    // um `serieId`. Isso mantém intactas todas as consultas que assumem uma
+    // data única por documento (agenda diária, visão mensal, busca, RSVP).
+    const datasSolicitadas = [
+      ...(date ? [date] : []),
+      ...(Array.isArray(dates) ? dates : [])
+    ]
+      .map((d) => (d || '').trim())
+      .filter((d) => FORMATO_DATA.test(d));
+
+    const datasUnicas = [...new Set(datasSolicitadas)].sort();
+
+    if (datasUnicas.length === 0) {
+      return res.status(400).json({ error: 'Informe pelo menos uma data válida (YYYY-MM-DD).' });
+    }
+
+    if (datasUnicas.length > MAX_DATAS_SERIE) {
+      return res.status(400).json({
+        error: `Máximo de ${MAX_DATAS_SERIE} dias por reserva. Selecione menos dias ou crie outra reserva.`
+      });
     }
 
     if (roomId === RESTRICTED_ROOM_ID && !RESTRICTED_ROOM_EMAILS.includes(userEmail)) {
       return res.status(403).json({ error: 'Esta sala é restrita apenas à administração.' });
     }
 
-    const startDateTime = new Date(`${date}T${startTime}:00`);
-    const endDateTime = new Date(`${date}T${endTime}:00`);
-
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - 10);
-
-    if (startDateTime >= endDateTime) {
+    // O horário é o mesmo em todos os dias, então basta validar uma vez.
+    if (startTime >= endTime) {
       return res.status(400).json({ error: 'Horário final deve ser maior que o inicial.' });
     }
 
-    if (startDateTime < now) {
-      return res.status(400).json({ error: 'Não é possível criar reservas no passado.' });
+    const limiteDoPassado = new Date();
+    limiteDoPassado.setMinutes(limiteDoPassado.getMinutes() - 10);
+
+    const datasNoPassado = datasUnicas.filter(
+      (d) => new Date(`${d}T${startTime}:00`) < limiteDoPassado
+    );
+
+    if (datasNoPassado.length > 0) {
+      return res.status(400).json({
+        error: datasUnicas.length === 1
+          ? 'Não é possível criar reservas no passado.'
+          : `Estes dias já passaram: ${datasNoPassado.map(formatarDataBR).join(', ')}.`,
+        datasInvalidas: datasNoPassado
+      });
     }
 
+    // Checa TODOS os dias antes de gravar qualquer coisa: criar metade da série
+    // e falhar no meio deixaria o usuário sem saber quais dias tem de fato.
     const bookingsRef = db.collection('bookings');
-    const snapshot = await bookingsRef
-      .where('roomId', '==', roomId)
-      .where('date', '==', date)
-      .get();
+    const snapshot = await bookingsRef.where('roomId', '==', roomId).get();
 
-    let conflito = false;
-    snapshot.forEach(doc => {
-      const reserva = doc.data();
-      const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
-      const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
-      if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
-    });
+    const conflitos = [];
+    for (const dia of datasUnicas) {
+      const inicio = new Date(`${dia}T${startTime}:00`);
+      const fim = new Date(`${dia}T${endTime}:00`);
 
-    if (conflito) {
-      return res.status(409).json({ error: 'Já existe uma reserva neste horário!' });
+      const ocupado = snapshot.docs.some((doc) => {
+        const reserva = doc.data();
+        if (reserva.date !== dia) return false;
+        const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
+        const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
+        return inicio < rEnd && fim > rStart;
+      });
+
+      if (ocupado) conflitos.push(dia);
+    }
+
+    if (conflitos.length > 0) {
+      return res.status(409).json({
+        error: datasUnicas.length === 1
+          ? 'Já existe uma reserva neste horário!'
+          : `A sala já está ocupada neste horário em: ${conflitos.map(formatarDataBR).join(', ')}. Nenhum dia foi reservado.`,
+        conflitos
+      });
     }
 
     // Expande grupos (do painel e Google Groups) em pessoas. O texto original
     // digitado pelo usuário continua salvo em `attendees`, para que a edição
     // da reserva mostre o grupo em vez de dezenas de e-mails soltos.
+    // Resolvido uma única vez e reutilizado em todos os dias da série.
     const convidados = await emailGroups.resolverConvidados(attendees);
     const attendeesList = convidados.emails;
 
@@ -179,46 +240,87 @@ app.post('/bookings', async (req, res) => {
       guestStatuses[email] = 'pendente';
     });
 
-    const novaReserva = {
-      roomId,
-      roomName,
-      date,
-      startTime,
-      endTime,
-      userEmail,
-      title: title || 'Reunião Reservada',
-      notes: notes || '',
-      attendees: attendees || '',
-      convidados: attendeesList,
-      guestStatuses,
-      termConfirmed: termConfirmed === true || termConfirmed === 'true',
-      createdAt: new Date().toISOString()
-    };
+    const ehSerie = datasUnicas.length > 1;
+    const serieId = ehSerie ? `serie-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : null;
+    const criadoEm = new Date().toISOString();
 
-    const docRef = await bookingsRef.add(novaReserva);
+    const criadas = [];
+    const falhas = [];
 
-    const googleEvent = await createCalendarEvent({ ...novaReserva, attendeesList });
+    for (const dia of datasUnicas) {
+      const novaReserva = {
+        roomId,
+        roomName,
+        date: dia,
+        startTime,
+        endTime,
+        userEmail,
+        title: title || 'Reunião Reservada',
+        notes: notes || '',
+        attendees: attendees || '',
+        convidados: attendeesList,
+        guestStatuses: { ...guestStatuses },
+        termConfirmed: termConfirmed === true || termConfirmed === 'true',
+        createdAt: criadoEm
+      };
 
-    // Guarda os identificadores do evento do Google para permitir
-    // atualizar/cancelar esse mesmo evento depois.
-    if (googleEvent && googleEvent.eventId) {
-      await docRef.update({
-        googleEventId: googleEvent.eventId,
-        googleCalendarId: googleEvent.calendarId
+      // Campos da série só existem quando há mais de um dia, para não poluir
+      // as reservas simples que são a maioria.
+      if (ehSerie) {
+        novaReserva.serieId = serieId;
+        novaReserva.serieDatas = datasUnicas;
+      }
+
+      const docRef = await bookingsRef.add(novaReserva);
+
+      // Um evento (e portanto um convite) por dia, como pedido: cada dia pode
+      // ser aceito, recusado ou remarcado de forma independente.
+      const googleEvent = await createCalendarEvent({ ...novaReserva, attendeesList });
+
+      if (googleEvent && googleEvent.eventId) {
+        await docRef.update({
+          googleEventId: googleEvent.eventId,
+          googleCalendarId: googleEvent.calendarId
+        });
+      } else {
+        // A reserva existe no sistema, mas o convite não saiu. Precisa aparecer
+        // na resposta em vez de passar por confirmada.
+        falhas.push(dia);
+      }
+
+      criadas.push({
+        id: docRef.id,
+        date: dia,
+        googleEventLink: googleEvent ? googleEvent.htmlLink : null
       });
     }
 
-    // Envia confirmação apenas ao organizador. Os convidados recebem o
-    // convite que adiciona o evento na agenda automaticamente, via Google.
+    // Uma única confirmação ao organizador, listando todos os dias — não faz
+    // sentido encher a caixa dele com um e-mail por dia. Os convidados recebem
+    // os convites pela Google Agenda, um por dia.
     await sendBookingConfirmationEmail({
-      ...novaReserva,
-      googleEventLink: googleEvent ? googleEvent.htmlLink : null
+      roomName,
+      userEmail,
+      title: title || 'Reunião Reservada',
+      notes: notes || '',
+      date: datasUnicas[0],
+      datas: datasUnicas,
+      startTime,
+      endTime,
+      convidados: attendeesList,
+      googleEventLink: criadas[0] ? criadas[0].googleEventLink : null
     });
 
     res.status(201).json({
       success: true,
-      message: 'Sala reservada com sucesso!',
-      googleEventLink: googleEvent ? googleEvent.htmlLink : null,
+      message: ehSerie
+        ? `Sala reservada em ${criadas.length} dias!`
+        : 'Sala reservada com sucesso!',
+      googleEventLink: criadas[0] ? criadas[0].googleEventLink : null,
+      serieId,
+      criadas,
+      totalDias: criadas.length,
+      conviteNaoEnviado: falhas,
       totalConvidados: attendeesList.length,
       gruposExpandidos: convidados.gruposUsados,
       naoResolvidos: convidados.naoResolvidos
@@ -327,18 +429,58 @@ app.delete('/bookings/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permissão negada. Apenas o dono ou Admin podem cancelar.' });
     }
 
-    await docRef.delete();
+    // `escopo=serie` cancela todos os dias restantes da série de uma vez —
+    // sem isso, cancelar uma reserva de 10 dias exigiria 10 cancelamentos.
+    const escopo = req.query?.escopo || req.body?.escopo;
+    const cancelarSerie = escopo === 'serie' && bookingData.serieId;
 
-    // Remove o evento do Google Agenda. O próprio Google notifica os
-    // convidados sobre o cancelamento (sendUpdates: 'all').
-    if (bookingData.googleEventId) {
-      await deleteCalendarEvent(
-        bookingData.googleCalendarId || bookingData.userEmail,
-        bookingData.googleEventId
-      );
+    let paraCancelar = [{ id: docRef.id, ref: docRef, dados: bookingData }];
+
+    if (cancelarSerie) {
+      const daSerie = await db.collection('bookings')
+        .where('serieId', '==', bookingData.serieId)
+        .get();
+
+      const hoje = new Date().toISOString().split('T')[0];
+
+      paraCancelar = daSerie.docs
+        // Dias que já aconteceram ficam como histórico; cancelar o passado não
+        // faz sentido e removeria o registro de um uso que de fato ocorreu.
+        .filter((d) => (d.data().date || '') >= hoje)
+        // Um admin pode cancelar a reserva de outra pessoa, mas não deve
+        // arrastar consigo dias de uma série que não é dele.
+        .filter((d) => !userEmail || d.data().userEmail === bookingData.userEmail)
+        .map((d) => ({ id: d.id, ref: d.ref, dados: d.data() }));
+
+      // Garante que o dia clicado entre na lista mesmo se for anterior a hoje.
+      if (!paraCancelar.some((item) => item.id === docRef.id)) {
+        paraCancelar.push({ id: docRef.id, ref: docRef, dados: bookingData });
+      }
     }
 
-    res.json({ success: true, message: 'Reserva cancelada.' });
+    const canceladas = [];
+    for (const item of paraCancelar) {
+      await item.ref.delete();
+
+      // Remove o evento do Google Agenda. O próprio Google notifica os
+      // convidados sobre o cancelamento (sendUpdates: 'all').
+      if (item.dados.googleEventId) {
+        await deleteCalendarEvent(
+          item.dados.googleCalendarId || item.dados.userEmail,
+          item.dados.googleEventId
+        );
+      }
+      canceladas.push(item.dados.date);
+    }
+
+    res.json({
+      success: true,
+      message: canceladas.length > 1
+        ? `${canceladas.length} dias cancelados.`
+        : 'Reserva cancelada.',
+      totalCancelado: canceladas.length,
+      datasCanceladas: canceladas.sort()
+    });
   } catch (error) {
     console.error('Erro ao cancelar reserva:', error);
     res.status(500).json({ error: 'Erro interno ao cancelar.' });

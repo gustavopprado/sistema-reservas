@@ -10,7 +10,8 @@ import {
   XCircle,
   Users,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CalendarDays
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -42,7 +43,17 @@ export default function MyBookings({ userEmail, onEdit }) {
       });
   };
 
-  const handleCancel = (bookingId) => {
+  // Quantos dias futuros cada série ainda tem, para saber quando oferecer o
+  // cancelamento em lote.
+  const diasPorSerie = ensureArray(bookings).reduce((acc, b) => {
+    if (b.serieId && b.isOwner) acc[b.serieId] = (acc[b.serieId] || 0) + 1;
+    return acc;
+  }, {});
+
+  const handleCancel = (booking) => {
+    const daSerie = booking.serieId ? diasPorSerie[booking.serieId] || 1 : 1;
+    const temSerie = daSerie > 1;
+
     toast(
       (t) => (
         <div className="flex flex-col gap-2">
@@ -50,17 +61,38 @@ export default function MyBookings({ userEmail, onEdit }) {
             <AlertTriangle className="text-[#0c6192]" size={20} />
             <span>Cancelar reserva?</span>
           </div>
-          <p className="text-sm text-gray-600">Essa ação não pode ser desfeita.</p>
-          <div className="flex gap-2 mt-2">
+
+          <p className="text-sm text-gray-600">
+            {temSerie
+              ? `Esta reserva faz parte de um conjunto de ${daSerie} dias futuros. Essa ação não pode ser desfeita.`
+              : 'Essa ação não pode ser desfeita.'}
+          </p>
+
+          <div className="flex flex-wrap gap-2 mt-2">
             <button
               onClick={() => {
                 toast.dismiss(t.id);
-                executeCancel(bookingId);
+                executeCancel(booking.id, 'dia');
               }}
               className="bg-red-500 text-white px-3 py-1.5 rounded text-sm font-bold hover:bg-red-600 transition-colors"
             >
-              Sim, cancelar
+              {temSerie
+                ? `Só ${booking.date.split('-').reverse().join('/')}`
+                : 'Sim, cancelar'}
             </button>
+
+            {temSerie && (
+              <button
+                onClick={() => {
+                  toast.dismiss(t.id);
+                  executeCancel(booking.id, 'serie');
+                }}
+                className="bg-red-700 text-white px-3 py-1.5 rounded text-sm font-bold hover:bg-red-800 transition-colors"
+              >
+                Todos os {daSerie} dias
+              </button>
+            )}
+
             <button
               onClick={() => toast.dismiss(t.id)}
               className="bg-gray-100 text-gray-600 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200 transition-colors"
@@ -71,7 +103,7 @@ export default function MyBookings({ userEmail, onEdit }) {
         </div>
       ),
       {
-        duration: 5000,
+        duration: temSerie ? 9000 : 5000,
         position: 'top-center',
         style: {
           border: '1px solid #fed7aa',
@@ -81,12 +113,17 @@ export default function MyBookings({ userEmail, onEdit }) {
     );
   };
 
-  const executeCancel = async (bookingId) => {
-    const promise = api.delete(`/bookings/${bookingId}`, { data: { userEmail } });
+  const executeCancel = async (bookingId, escopo = 'dia') => {
+    const promise = api.delete(`/bookings/${bookingId}`, {
+      data: { userEmail, escopo }
+    });
 
     toast.promise(promise, {
-      loading: 'Cancelando...',
-      success: 'Reserva cancelada!',
+      loading: escopo === 'serie' ? 'Cancelando todos os dias...' : 'Cancelando...',
+      success: (res) => {
+        const total = res?.data?.totalCancelado || 1;
+        return total > 1 ? `${total} dias cancelados!` : 'Reserva cancelada!';
+      },
       error: (err) => err.response?.data?.error || 'Erro ao cancelar.'
     });
 
@@ -205,6 +242,22 @@ export default function MyBookings({ userEmail, onEdit }) {
                       Convidado
                     </span>
                   )}
+
+                  {booking.serieId && (
+                    <span
+                      className="text-xs font-bold px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 flex items-center gap-1"
+                      title={
+                        Array.isArray(booking.serieDatas)
+                          ? `Dias da reserva: ${booking.serieDatas.map((d) => d.split('-').reverse().join('/')).join(', ')}`
+                          : 'Reserva de vários dias'
+                      }
+                    >
+                      <CalendarDays size={12} />
+                      {Array.isArray(booking.serieDatas)
+                        ? `Dia ${booking.serieDatas.indexOf(booking.date) + 1} de ${booking.serieDatas.length}`
+                        : 'Vários dias'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-4 text-sm text-gray-600 mt-2">
@@ -269,7 +322,7 @@ export default function MyBookings({ userEmail, onEdit }) {
                     </button>
 
                     <button
-                      onClick={() => handleCancel(booking.id)}
+                      onClick={() => handleCancel(booking)}
                       className="flex items-center gap-2 text-red-500 hover:bg-red-50 px-4 py-2 rounded-lg transition-colors text-sm font-bold"
                     >
                       <Trash2 size={16} />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText, UsersRound } from 'lucide-react';
+import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText, UsersRound, CalendarDays } from 'lucide-react';
 import api from '../api';
+import MultiDatePicker from './MultiDatePicker';
 // Lista local: usada apenas como fallback se o diretório do Workspace estiver
 // indisponível. A fonte normal é a rota /directory/users.
 import usersList from '../users.json';
@@ -28,6 +29,12 @@ export default function ReservationModal({
     notes: ''
   });
   
+  // Reserva de vários dias: `formData.date` é a primeira data e `datasExtras`
+  // guarda os outros dias, todos no mesmo horário.
+  const [multiDias, setMultiDias] = useState(false);
+  const [datasExtras, setDatasExtras] = useState([]);
+  const [conflitosServidor, setConflitosServidor] = useState([]);
+
   const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -273,23 +280,37 @@ export default function ReservationModal({
     }
 
     setLoading(true);
+    setConflitosServidor([]);
+
+    // Dias extras vão apenas na criação; editar age sobre um dia só.
+    const diasExtras = (!editingBooking && multiDias) ? datasExtras : [];
 
     // 2. LOGICA NOVA COM TOAST PROMISE
     // O toast.promise "abraça" a requisição
     const promise = editingBooking
       ? api.put(`/bookings/${editingBooking.id}`, { roomId: room.id, ...formData })
-      : api.post('/bookings', { roomId: room.id, roomName: room.nome, termConfirmed: isSalao ? confirmedTerms : false, ...formData });
+      : api.post('/bookings', {
+          roomId: room.id,
+          roomName: room.nome,
+          termConfirmed: isSalao ? confirmedTerms : false,
+          ...formData,
+          dates: diasExtras
+        });
 
     toast.promise(
        promise,
        {
-         loading: 'Processando reserva...',
+         loading: diasExtras.length > 0
+           ? `Reservando ${diasExtras.length + 1} dias e enviando os convites...`
+           : 'Processando reserva...',
          success: (res) => {
              onSuccess();
              onClose();
 
              const total = res?.data?.totalConvidados || 0;
+             const totalDias = res?.data?.totalDias || 1;
              const naoResolvidos = ensureArray(res?.data?.naoResolvidos);
+             const conviteNaoEnviado = ensureArray(res?.data?.conviteNaoEnviado);
 
              // Um token que o backend não reconheceu (grupo renomeado/excluído)
              // não pode passar em silêncio — ninguém daquele grupo foi convidado.
@@ -297,11 +318,35 @@ export default function ReservationModal({
                toast.error(`Não foi possível identificar: ${naoResolvidos.join(', ')}`, { duration: 6000 });
              }
 
-             const base = editingBooking ? 'Reserva atualizada!' : 'Reserva criada com sucesso!';
+             // A sala ficou reservada, mas o convite daquele dia não saiu.
+             if (conviteNaoEnviado.length > 0) {
+               toast.error(
+                 `A sala foi reservada, mas o convite não foi enviado em: ` +
+                 conviteNaoEnviado.map((d) => d.split('-').reverse().join('/')).join(', '),
+                 { duration: 8000 }
+               );
+             }
+
+             if (editingBooking) {
+               return total > 0
+                 ? `Reserva atualizada! ${total} convidado(s) notificado(s).`
+                 : 'Reserva atualizada!';
+             }
+
+             const base = totalDias > 1
+               ? `Sala reservada em ${totalDias} dias!`
+               : 'Reserva criada com sucesso!';
+
              return total > 0 ? `${base} ${total} convidado(s) notificado(s).` : base;
          },
          error: (err) => {
-             // Pega a mensagem de erro do servidor
+             // Dias ocupados voltam marcados para o usuário ajustar a seleção
+             // em vez de ter que descobrir sozinho qual dia deu problema.
+             const conflitos = ensureArray(err.response?.data?.conflitos);
+             const invalidas = ensureArray(err.response?.data?.datasInvalidas);
+             if (conflitos.length > 0 || invalidas.length > 0) {
+               setConflitosServidor([...conflitos, ...invalidas]);
+             }
              return err.response?.data?.error || "Ocorreu um erro ao salvar.";
          },
        }
@@ -378,6 +423,55 @@ export default function ReservationModal({
                 </div>
               </div>
             </div>
+
+            {/* MAIS DE UM DIA — indisponível ao editar, porque a edição age
+                sobre um único dia da série. */}
+            {editingBooking ? (
+              editingBooking.serieId && (
+                <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-3 text-xs">
+                  <CalendarDays size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    Esta reserva faz parte de um conjunto de vários dias. As alterações
+                    aqui valem <strong>somente para {formData.date.split('-').reverse().join('/')}</strong>.
+                  </span>
+                </div>
+              )
+            ) : (
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={multiDias}
+                    onChange={(e) => {
+                      setMultiDias(e.target.checked);
+                      if (!e.target.checked) setDatasExtras([]);
+                    }}
+                    className="w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand/30"
+                  />
+                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+                    <CalendarDays size={16} className="text-brand" />
+                    Usar a sala em mais de um dia, no mesmo horário
+                  </span>
+                </label>
+
+                {multiDias && (
+                  <div className="mt-3">
+                    <MultiDatePicker
+                      roomId={room.id}
+                      primaryDate={formData.date}
+                      startTime={formData.startTime}
+                      endTime={formData.endTime}
+                      selectedDates={datasExtras}
+                      onChange={(datas) => {
+                        setDatasExtras(datas);
+                        setConflitosServidor([]);
+                      }}
+                      conflitosDoServidor={conflitosServidor}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* RESPONSÁVEL */}
             <div>

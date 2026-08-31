@@ -111,6 +111,7 @@ sistema-reservas/
             ├── DailyView.jsx               # Agenda do dia (linha do tempo por sala)
             ├── RoomMonthView.jsx           # Visão mensal de reservas por sala
             ├── ReservationModal.jsx        # Modal de criação e edição de reservas
+            ├── MultiDatePicker.jsx         # Seletor dos dias extras de uma reserva
             ├── MyBookings.jsx              # Reservas próprias e convites recebidos
             ├── AdminRoomPanel.jsx          # Painel de histórico completo de salas
             ├── AdminEmailGroupsPanel.jsx   # Painel de grupos de convidados e diretório
@@ -146,6 +147,11 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - **Agenda Diária** — linha do tempo visual com os blocos ocupados de cada sala no dia selecionado. Clique em um horário vazio abre o modal de reserva já preenchido.
 - **Visão Mensal** — calendário mensal por sala, destacando os dias com reservas.
 - **Criar Reserva** — formulário com título, data, horário de início/fim e lista de convidados (separados por vírgula). Validação de conflito em tempo real antes de salvar.
+- **Reserva de vários dias** — a mesma sala, no mesmo horário, em vários dias (seguidos ou espalhados). O seletor traz atalhos (`+2 dias seguidos`, `+4 dias úteis`, `+3 semanas`) e um calendário do mês em que os dias já ocupados naquele horário aparecem bloqueados. Os atalhos **pulam** os dias ocupados e seguem até completar a quantidade pedida.
+
+  Cada dia gera **um evento e um convite próprios** no Google Calendar, então cada dia pode ser aceito, recusado ou remarcado de forma independente. O organizador recebe **um único e-mail** listando todos os dias.
+
+  A validação é tudo-ou-nada: se algum dia estiver ocupado, **nenhum** é reservado e a resposta diz quais dias falharam. Teto de 30 dias por reserva.
 - **Convidados vindos do Workspace** — o autocomplete lista os colaboradores ativos direto do Google Workspace (Admin SDK Directory API), com cache de 15 minutos. Admissões e desligamentos refletem sozinhos, sem editar arquivo nenhum.
 - **Grupos de convidados** — é possível convidar um grupo inteiro em vez de digitar cada pessoa. Dois tipos convivem no mesmo autocomplete:
   - **Grupos do painel** — criados pelo admin na aba *Grupos de E-mail*, referenciados pelo token `grupo:<slug>`. Servem para combinações que não existem no Workspace (ex.: "Comitê de Obras").
@@ -160,7 +166,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 
 **Regras de negócio**
 
-- Não é permitido criar reservas em horários já ocupados (verificação de overlap no backend).
+- Não é permitido criar reservas em horários já ocupados (verificação de overlap no backend, em **todos** os dias da reserva antes de gravar qualquer um).
 - Não é permitido agendar no passado (tolerância de 10 minutos).
 - O horário final deve ser posterior ao inicial.
 - A **Sala Restrita** só pode ser reservada pelos e-mails listados em `RESTRICTED_ROOM_EMAILS`.
@@ -231,7 +237,7 @@ Todos os e-mails são enviados a partir da conta configurada em `GMAIL_USER`, vi
 
 | Evento | Destinatários | Tipo de e-mail |
 |---|---|---|
-| Criação de reserva | Organizador + convidados | Convite com arquivo `invite.ics` (método `REQUEST`) |
+| Criação de reserva | Organizador + convidados | Convite com arquivo `invite.ics` (método `REQUEST`). Reserva de vários dias: um convite por dia aos convidados, um único e-mail-resumo ao organizador |
 | Edição de reserva | Organizador + convidados | Convite atualizado (SEQUENCE incrementada) |
 | Cancelamento | Organizador + convidados | Cancelamento iCal (método `CANCEL`) — remove da agenda |
 
@@ -372,7 +378,7 @@ A lista de pessoas e grupos fica em memória por `DIRECTORY_CACHE_TTL_MINUTES` (
 | Coleção | Descrição |
 |---|---|
 | `rooms` | Salas de reunião cadastradas (nome, capacidade, localização, equipamentos) |
-| `bookings` | Reservas de sala (data, horário, organizador, convidados, status RSVP) |
+| `bookings` | Reservas de sala (data, horário, organizador, convidados, status RSVP). Uma reserva de vários dias vira **um documento por dia**, unidos por `serieId` + `serieDatas` |
 | `cars` | Veículos cadastrados (modelo, placa, categoria, KM atual) |
 | `car_bookings` | Reservas de veículo (período, destino, status, KM, código `VEI-`) |
 | `car_costs` | Custos registrados por veículo (combustível, manutenção, multa, etc.) |
@@ -423,7 +429,7 @@ Pontos que ainda precisam ser endereçados:
 | Método | Endpoint | Descrição |
 |---|---|---|
 | `GET` | `/rooms` | Lista todas as salas |
-| `POST` | `/bookings` | Cria nova reserva de sala |
+| `POST` | `/bookings` | Cria reserva de sala. Aceita `date` e/ou `dates[]` (vários dias no mesmo horário) |
 | `GET` | `/bookings/search` | Busca reservas por `date` (e opcionalmente `roomId`) |
 | `GET` | `/bookings/room-month` | Reservas de uma sala no mês (`roomId`, `month=YYYY-MM`) |
 | `GET` | `/bookings/my` | Reservas e convites do usuário (`email`) |
@@ -431,7 +437,7 @@ Pontos que ainda precisam ser endereçados:
 | `POST` | `/calendar/freebusy` | Consulta disponibilidade dos convidados |
 | `PUT` | `/bookings/:id` | Edita reserva |
 | `PUT` | `/bookings/:id/rsvp` | Responde convite (`aceito`, `recusado`, `pendente`) |
-| `DELETE` | `/bookings/:id` | Cancela reserva |
+| `DELETE` | `/bookings/:id` | Cancela reserva. `escopo=serie` cancela todos os dias futuros da série |
 
 ### Diretório e grupos de convidados
 
