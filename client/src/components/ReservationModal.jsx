@@ -8,6 +8,7 @@ import usersList from '../users.json';
 // 1. IMPORTAR O TOAST
 import toast from 'react-hot-toast';
 import TermoPdfModal from './TermoPdfModal';
+import ErrorBoundary from './ErrorBoundary';
 import { RESTRICTED_ROOM_ID } from '../config';
 import { responsavelDe } from '../bookingDisplay';
 
@@ -696,9 +697,15 @@ export default function ReservationModal({
             )}
 
             {/* TERMO DE USO DO SALÃO — apenas para o Salão */}
+            {/* As duas versões da caixa têm `key` diferente de propósito: assim o
+                React descarta a caixa inteira e monta a outra, em vez de trocar
+                os filhos um a um dentro do botão. Quando algo externo mexe no
+                DOM (extensão ou tradutor de página, que substitui os nós de
+                texto), a troca cirúrgica falha com "removeChild: node is not a
+                child of this node" e derrubava a tela toda. */}
             {isSalao && (
               confirmedTerms ? (
-                <div className="rounded-xl border p-4 bg-green-50 border-green-300">
+                <div key="termo-confirmado" className="rounded-xl border p-4 bg-green-50 border-green-300">
                   <div className="flex items-start gap-2.5">
                     <Check size={18} className="text-green-600 mt-0.5 shrink-0" />
                     <p className="text-sm font-semibold text-gray-800">
@@ -714,7 +721,7 @@ export default function ReservationModal({
                   </button>
                 </div>
               ) : (
-                <div className="rounded-xl border p-4 bg-amber-50 border-amber-300">
+                <div key="termo-pendente" className="rounded-xl border p-4 bg-amber-50 border-amber-300">
                   <p className="text-xs text-gray-700 leading-relaxed mb-3">
                     Para reservar o salão de eventos é necessário ler a Instrução de Trabalho de uso do salão e confirmar a ciência ao final do documento.
                   </p>
@@ -800,14 +807,23 @@ export default function ReservationModal({
 
       {/* MODAL DO TERMO DE USO (PDF) */}
       {showTermoModal && (
-        <TermoPdfModal
-          pdfUrl={TERMO_SALAO_PDF}
-          onClose={() => setShowTermoModal(false)}
-          onConfirm={() => {
-            setConfirmedTerms(true);
-            setShowTermoModal(false);
-          }}
-        />
+        // O leitor de PDF é a parte mais frágil desta tela (react-pdf/pdf.js).
+        // Isolado numa barreira, um erro dele não derruba o formulário inteiro
+        // nem apaga o que o usuário já preencheu.
+        <ErrorBoundary
+          compacto
+          titulo="Não foi possível exibir o termo de uso."
+          aoResetar={() => setShowTermoModal(false)}
+        >
+          <TermoPdfModal
+            pdfUrl={TERMO_SALAO_PDF}
+            onClose={() => setShowTermoModal(false)}
+            onConfirm={() => {
+              setConfirmedTerms(true);
+              setShowTermoModal(false);
+            }}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
