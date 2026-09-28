@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Plus, Edit, CarFront, Settings, Check, CheckCircle, X, History, Calendar, User, Gauge, MapPin, DollarSign, Receipt, Filter, PieChart, Trash2, FileText, Wrench as WrenchIcon, ShieldAlert, Lock } from 'lucide-react';
+import { Plus, Edit, CarFront, Settings, Check, CheckCircle, X, History, Calendar, User, Gauge, MapPin, DollarSign, Receipt, Filter, PieChart, Trash2, FileText, FileSpreadsheet, Wrench as WrenchIcon, ShieldAlert, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { exportCarBookingsXlsx } from '../exportCarBookingsXlsx';
 import CarDailyView from './CarDailyView';
 import CarRegularizadaModal from './CarRegularizadaModal';
 import CarMaintenancePanel from './CarMaintenancePanel';
@@ -44,6 +45,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
   });
   const [histCarSearch, setHistCarSearch] = useState('');
   const [histCarDropdownOpen, setHistCarDropdownOpen] = useState(false);
+  const [exportingHistory, setExportingHistory] = useState(false);
 
   // --- NOVOS ESTADOS: CUSTOS ---
   const [costs, setCosts] = useState([]);
@@ -338,6 +340,19 @@ export default function AdminCarPanel({ currentUserEmail }) {
     return matchCar && matchUser && matchDataInicial && matchDataFinal && matchHoraInicial && matchHoraFinal && matchCode;
   });
 
+  const handleExportHistory = async () => {
+    setExportingHistory(true);
+    try {
+      await exportCarBookingsXlsx({ bookings: filteredFinished, cars, normalizeCategory });
+      toast.success(`Relatório gerado com ${filteredFinished.length} reserva${filteredFinished.length !== 1 ? 's' : ''}.`);
+    } catch (err) {
+      console.error('Erro ao gerar relatório Excel:', err);
+      toast.error('Erro ao gerar o relatório em Excel.');
+    } finally {
+      setExportingHistory(false);
+    }
+  };
+
   // Filtro Inteligente do Resumo Financeiro
   const filteredCosts = (Array.isArray(costs) ? costs : []).filter(cost => {
     const matchInicio = costFilters.dataInicio ? cost.dataServico >= costFilters.dataInicio : true;
@@ -452,12 +467,22 @@ export default function AdminCarPanel({ currentUserEmail }) {
           </button>
         )}
         {activeTab === 'historico' && (
-          <button
-            onClick={() => setIsRegularizadaOpen(true)}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm shadow-sm transition-colors shrink-0"
-          >
-            <FileText size={16} /> Regularizar Reserva
-          </button>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              onClick={handleExportHistory}
+              disabled={exportingHistory || loadingFinished || filteredFinished.length === 0}
+              title="Baixa em Excel as reservas listadas abaixo, respeitando os filtros aplicados"
+              className="bg-green-700 hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm shadow-sm transition-colors"
+            >
+              <FileSpreadsheet size={16} /> {exportingHistory ? 'Gerando...' : 'Exportar Excel'}
+            </button>
+            <button
+              onClick={() => setIsRegularizadaOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm shadow-sm transition-colors"
+            >
+              <FileText size={16} /> Regularizar Reserva
+            </button>
+          </div>
         )}
       </div>
 
