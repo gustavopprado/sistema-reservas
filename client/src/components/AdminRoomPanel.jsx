@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Download, FileText, Filter, Users, Calendar, BookOpen, Shield, X } from 'lucide-react';
+import { Search, Download, FileText, Filter, Users, Calendar, BookOpen, Shield, X, UsersRound } from 'lucide-react';
 import api from '../api';
+import AdminEmailGroupsPanel from './AdminEmailGroupsPanel';
+import { responsavelDe, temSolicitante } from '../bookingDisplay';
 
 const ID_SALAO = 'j7QOhdPRzEJcza2cMqwM';
 
@@ -62,7 +64,8 @@ function generateTermoPDF(booking) {
   <div class="section">
     <div class="section-label">Detalhes da Reserva</div>
     <div class="grid">
-      <div class="field"><label>Responsável</label><span>${booking.userEmail}</span></div>
+      <div class="field"><label>Responsável</label><span>${responsavelDe(booking)}</span></div>
+      ${temSolicitante(booking) ? `<div class="field"><label>Reservado por</label><span>${booking.userEmail}</span></div>` : ''}
       <div class="field"><label>Sala</label><span>${booking.roomName || 'Salão de Eventos'}</span></div>
       <div class="field"><label>Data</label><span>${fmtDate(booking.date)}</span></div>
       <div class="field"><label>Horário</label><span>${booking.startTime} – ${booking.endTime}</span></div>
@@ -105,6 +108,7 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [aba, setAba] = useState('reservas');
 
   const fetchBookings = useCallback(async (activeFilters = filters) => {
     setLoading(true);
@@ -135,13 +139,14 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
   };
 
   const exportCSV = () => {
-    const headers = ['Data', 'Início', 'Fim', 'Sala', 'Título', 'Responsável', 'Convidados', 'Observações', 'Termo Confirmado', 'Criado em'];
+    const headers = ['Data', 'Início', 'Fim', 'Sala', 'Título', 'Responsável', 'Reservado por', 'Convidados', 'Observações', 'Termo Confirmado', 'Criado em'];
     const rows = bookings.map(b => [
       fmtDate(b.date),
       b.startTime || '',
       b.endTime   || '',
       b.roomName  || '',
       b.title     || '',
+      responsavelDe(b),
       b.userEmail || '',
       b.attendees || '',
       b.notes     || '',
@@ -173,6 +178,26 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
 
   return (
     <div className="animate-fade-in-up">
+      {/* Abas do painel */}
+      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+        {[
+          { id: 'reservas', label: 'Reservas', Icon: BookOpen },
+          { id: 'grupos',   label: 'Grupos de E-mail', Icon: UsersRound },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setAba(id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              aba === id ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'grupos' ? <AdminEmailGroupsPanel /> : (
+      <>
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {stats.map(({ label, value, Icon, color }) => (
@@ -282,7 +307,14 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
                       <td className="px-4 py-3 text-gray-700 max-w-[180px] truncate" title={booking.title}>
                         {booking.title || '—'}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{booking.userEmail}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {responsavelDe(booking)}
+                        {temSolicitante(booking) && (
+                          <span className="block text-[10px] text-gray-400">
+                            reservado por {booking.userEmail}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={booking.attendees}>
                         {booking.attendees || '—'}
                       </td>
@@ -316,6 +348,8 @@ export default function AdminRoomPanel({ currentUserEmail, rooms }) {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

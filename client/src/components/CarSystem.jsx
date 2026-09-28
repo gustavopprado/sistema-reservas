@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { CarFront, List, Wrench, ArrowLeft, FileText, Calendar, BookOpen } from 'lucide-react';
+import { CarFront, List, Wrench, ArrowLeft, FileText, Calendar, Files } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import CarList from './CarList';
 import CarReservationModal from './CarReservationModal';
@@ -8,10 +8,11 @@ import MyCarBookings from './MyCarBookings';
 import AdminCarPanel from './AdminCarPanel';
 import CarRegularizadaModal from './CarRegularizadaModal';
 import CarDailyView from './CarDailyView';
-import CarManualModal from './CarManualModal';
+import CarDocumentsView from './CarDocumentsView';
 import { FLEET_ADMIN_EMAILS } from '../config';
 
-// Instrução de Trabalho sobre a reserva/uso dos veículos (arquivo em client/public/termos)
+// Instrução de Trabalho sobre a reserva/uso dos veículos (arquivo em client/public/termos).
+// Só aparece na aba Documentos enquanto o Suprimentos não cadastrar documentos.
 const MANUAL_VEICULOS_PDF = encodeURI('/termos/IT_DEPSU_017-VEÍCULO.pdf');
 
 export default function CarSystem({ user, onBack }) {
@@ -24,7 +25,6 @@ export default function CarSystem({ user, onBack }) {
   const [selectedCar, setSelectedCar] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRegularizadaOpen, setIsRegularizadaOpen] = useState(false);
-  const [isManualOpen, setIsManualOpen] = useState(false);
 
   // Lista de admins de frota — ver client/.env.example
   const ADMIN_EMAILS = FLEET_ADMIN_EMAILS;
@@ -160,20 +160,24 @@ export default function CarSystem({ user, onBack }) {
               </button>
 
               <button
+                onClick={() => setViewMode('documentos')}
+                title="Documentos da frota"
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-bold transition-all ${
+                  viewMode === 'documentos'
+                    ? 'bg-white shadow text-[#0a4b70]'
+                    : 'text-[#0c6192] hover:text-[#0a4b70] hover:bg-blue-50'
+                }`}
+              >
+                <Files size={18} />
+                <span className="hidden md:inline">Documentos</span>
+              </button>
+
+              <button
                 onClick={() => setIsRegularizadaOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all text-amber-600 hover:text-amber-700 hover:bg-amber-50"
               >
                 <FileText size={18} />
                 <span className="hidden md:inline">Regularizar</span>
-              </button>
-
-              <button
-                onClick={() => setIsManualOpen(true)}
-                title="Manual de reserva de veículos"
-                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-              >
-                <BookOpen size={18} />
-                <span className="hidden md:inline">Manual</span>
               </button>
 
               {isAdmin && (
@@ -208,8 +212,12 @@ export default function CarSystem({ user, onBack }) {
               {viewMode === 'list' && <CarList cars={cars} blockedCarIds={blockedCarIds} onReserve={handleOpenModal} />}
               {viewMode === 'my_bookings' && <MyCarBookings userEmail={currentUserEmail} />}
               {viewMode === 'agenda' && <CarDailyView cars={cars} />}
+              {viewMode === 'documentos' && <CarDocumentsView fallbackPdfUrl={MANUAL_VEICULOS_PDF} />}
               {viewMode === 'admin' && isAdmin && (
-                <AdminCarPanel currentUserEmail={currentUserEmail} />
+                <AdminCarPanel
+                  currentUserEmail={currentUserEmail}
+                  onOpenDocuments={() => setViewMode('documentos')}
+                />
               )}
             </>
           )}
@@ -231,13 +239,6 @@ export default function CarSystem({ user, onBack }) {
           currentUserEmail={currentUserEmail}
           onClose={() => setIsRegularizadaOpen(false)}
           onSuccess={handleSuccess}
-        />
-      )}
-
-      {isManualOpen && (
-        <CarManualModal
-          pdfUrl={MANUAL_VEICULOS_PDF}
-          onClose={() => setIsManualOpen(false)}
         />
       )}
     </div>

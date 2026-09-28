@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Reservas FGV — Início (desktop)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&amp;family=Figtree:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F4F5EF}
+a{color:#2F6B1F}a:hover{color:#1D3B24}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 36px 72px 32px; display: flex; flex-direction: column; gap: 36px; background: #F4F5EF; color: #16211A; font-family: 'Figtree', 'Segoe UI', system-ui, sans-serif">
+
+<header style="display: flex; align-items: center; justify-content: space-between; height: 56px">
+<div style="display: flex; align-items: center; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-family: 'Bricolage Grotesque', Georgia, serif; font-weight: 800; font-size: 34px; line-height: 1; letter-spacing: -1px; color: #5FA83E">FGV</div>
+<div style="font-size: 11px; font-weight: 600; color: #55615A; letter-spacing: 0.2px">Ferragens para Móveis</div>
+</div>
+<div style="width: 1px; height: 32px; background: #D5DACF"></div>
+<div style="font-size: 15px; font-weight: 600; color: #16211A">Reservas</div>
+</div>
+<div style="display: flex; align-items: center; gap: 16px">
+<div style="display: flex; align-items: center; gap: 10px">
+<div style="width: 40px; height: 40px; border-radius: 999px; background: #16211A; color: #F4F5EF; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px">G</div>
+<div style="font-size: 15px; font-weight: 600">Gustavo</div>
+</div>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #D5DACF; background: #FFFFFF; color: #16211A; font-family: inherit; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+Sair
+</button>
+</div>
+</header>
+
+<main style="flex-grow: 1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; min-height: 0">
+
+<section style="grid-column: span 4; display: flex; flex-direction: column; justify-content: space-between; padding: 8px 16px 0 0">
+<div style="display: flex; flex-direction: column; gap: 24px">
+<div style="align-self: flex-start; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 999px; background: #FFFFFF; border: 1px solid #DCE0D6; font-size: 13px; font-weight: 600; color: #3B4740">
+<span style="width: 8px; height: 8px; border-radius: 999px; background: {{accent}}"></span>
+Quinta-feira, 24 de setembro
+</div>
+<h1 style="margin: 0; font-family: 'Bricolage Grotesque', Georgia, serif; font-weight: 700; font-size: 68px; line-height: 0.98; letter-spacing: -2.5px; color: #16211A">Boa tarde,<br>Gustavo.</h1>
+<p style="margin: 0; font-size: 20px; line-height: 1.45; color: #55615A; max-width: 340px">O que você precisa reservar hoje? Escolha ao lado e confira a disponibilidade em tempo real.</p>
+</div>
+
+<div style="background: #FFFFFF; border: 1px solid #DCE0D6; border-radius: 20px; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="font-size: 15px; font-weight: 700">Suas próximas reservas</div>
+<a href="#minhas-reservas" style="font-size: 14px; font-weight: 600; text-decoration: none">Ver todas</a>
+</div>
+<div style="display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: #F4F5EF">
+<div style="width: 40px; height: 40px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; color: #55615A; flex-shrink: 0">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 14px; font-weight: 600">Nada agendado por enquanto</div>
+<div style="font-size: 13px; color: #55615A">Suas reservas dos próximos 7 dias aparecem aqui.</div>
+</div>
+</div>
+</div>
+</section>
+
+<div style="grid-column: span 8; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+
+<a href="#salas" style="display: flex; flex-direction: column; justify-content: space-between; padding: 32px; border-radius: 28px; background: #1D3B24; color: #F4F5EF; text-decoration: none; overflow: hidden">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="width: 56px; height: 56px; border-radius: 18px; background: {{accent}}; color: #10240F; display: flex; align-items: center; justify-content: center">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"></path></svg>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: rgba(123,194,88,0.16); color: #C3E8AD; font-size: 13px; font-weight: 600">
+<span style="width: 7px; height: 7px; border-radius: 999px; background: {{accent}}"></span>
+Disponível agora
+</div>
+</div>
+
+<div style="display: flex; align-items: center; justify-content: center; flex-grow: 1; padding: 12px 0">
+<svg width="280" height="180" viewBox="0 0 280 180" fill="none" stroke="{{accent}}" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="opacity: 0.85">
+<rect x="50" y="55" width="180" height="70" rx="35"></rect>
+<rect x="70" y="22" width="34" height="22" rx="7"></rect>
+<rect x="123" y="22" width="34" height="22" rx="7"></rect>
+<rect x="176" y="22" width="34" height="22" rx="7"></rect>
+<rect x="70" y="136" width="34" height="22" rx="7"></rect>
+<rect x="123" y="136" width="34" height="22" rx="7"></rect>
+<rect x="176" y="136" width="34" height="22" rx="7"></rect>
+<rect x="12" y="76" width="22" height="28" rx="7"></rect>
+<rect x="246" y="76" width="22" height="28" rx="7"></rect>
+<path d="M110 90h60" stroke-dasharray="4 8" opacity="0.6"></path>
+</svg>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', Georgia, serif; font-weight: 700; font-size: 38px; line-height: 1.05; letter-spacing: -1px">Salas de reunião</h2>
+<p style="margin: 0; font-size: 16px; line-height: 1.5; color: #B9C7BC">Reuniões, treinamentos e eventos internos.</p>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; padding-top: 20px; border-top: 1px solid rgba(244,245,239,0.14)">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 13px; color: #B9C7BC">Livres agora</div>
+<div style="font-size: 18px; font-weight: 700">[n] de [total] salas</div>
+</div>
+<div style="width: 56px; height: 56px; border-radius: 999px; background: {{accent}}; color: #10240F; display: flex; align-items: center; justify-content: center">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+</div>
+</div>
+</div>
+</a>
+
+<a href="#veiculos" style="display: flex; flex-direction: column; justify-content: space-between; padding: 32px; border-radius: 28px; background: #FFFFFF; border: 1px solid #DCE0D6; color: #16211A; text-decoration: none; overflow: hidden">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="width: 56px; height: 56px; border-radius: 18px; background: #E2EBF6; color: #1F4E8C; display: flex; align-items: center; justify-content: center">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17h14M5 17a2 2 0 1 1-4 0v-5l2-5a2 2 0 0 1 2-1h14a2 2 0 0 1 2 1l2 5v5a2 2 0 1 1-4 0"></path><circle cx="7" cy="17" r="2"></circle><circle cx="17" cy="17" r="2"></circle><path d="M3 12h18"></path></svg>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: #E2EBF6; color: #1F4E8C; font-size: 13px; font-weight: 600">
+<span style="width: 7px; height: 7px; border-radius: 999px; background: #1F4E8C"></span>
+Frota disponível
+</div>
+</div>
+
+<div style="display: flex; align-items: center; justify-content: center; flex-grow: 1; padding: 12px 0">
+<svg width="280" height="180" viewBox="0 0 280 180" fill="none" stroke="#1F4E8C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="opacity: 0.8">
+<path d="M0 150h280" opacity="0.35"></path>
+<path d="M20 165h30M80 165h30M140 165h30M200 165h30M260 165h20" opacity="0.35"></path>
+<path d="M48 120V98c0-6 3-10 9-12l26-8 22-26c4-5 9-7 15-7h52c6 0 11 2 15 6l28 27 22 6c8 2 13 8 13 16v20"></path>
+<path d="M48 120h22M110 120h72M222 120h28"></path>
+<circle cx="90" cy="120" r="18"></circle>
+<circle cx="202" cy="120" r="18"></circle>
+<circle cx="90" cy="120" r="6"></circle>
+<circle cx="202" cy="120" r="6"></circle>
+<path d="M98 78l18-22c2-2 4-3 7-3h19v25z"></path>
+<path d="M150 53h19c3 0 5 1 7 3l21 22h-47z"></path>
+<path d="M140 90h10"></path>
+</svg>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-family: 'Bricolage Grotesque', Georgia, serif; font-weight: 700; font-size: 38px; line-height: 1.05; letter-spacing: -1px">Veículos corporativos</h2>
+<p style="margin: 0; font-size: 16px; line-height: 1.5; color: #55615A">Visitas, viagens e serviços externos.</p>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; padding-top: 20px; border-top: 1px solid #E6E9E1">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 13px; color: #55615A">Livres agora</div>
+<div style="font-size: 18px; font-weight: 700">[n] de [total] carros</div>
+</div>
+<div style="width: 56px; height: 56px; border-radius: 999px; background: #1F4E8C; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+</div>
+</div>
+</div>
+</a>
+
+</div>
+</main>
+
+<footer style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #5F6B63">
+<div>Sistema de Reservas FGV · v2.0</div>
+<div style="display: flex; align-items: center; gap: 8px">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg>
+Disponibilidade sincronizada com o Google Agenda
+</div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#7BC258","options":["#7BC258","#5FA83E","#9BD27E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#7BC258' };
+  }
+}
+</script>
+</body>
+</html>

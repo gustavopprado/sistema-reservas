@@ -22,11 +22,30 @@ const {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
-  getFreeBusy
+  getFreeBusy,
+  getEventAttendees
 } = require('./calendarService');
+const directory = require('./directoryService');
+const emailGroups = require('./emailGroups');
+const driveDocuments = require('./driveDocuments');
 
 // --- CONSTANTES DE ADMINISTRAÇÃO ---
 const ADMIN_EMAIL = config.admin.roomsAdmin;
+
+// --- RESERVAS DE VÁRIOS DIAS ---
+// Uma reserva pode cobrir vários dias no mesmo horário. Cada dia é um
+// documento próprio na coleção `bookings`, com seu próprio evento no Google
+// Calendar; os documentos de uma mesma solicitação compartilham um `serieId`.
+const FORMATO_DATA = /^\d{4}-\d{2}-\d{2}$/;
+
+// Teto por reserva. Cada dia consome uma chamada de criação de evento no
+// Google, então uma série gigante seria lenta e fácil de criar por engano.
+const MAX_DATAS_SERIE = 30;
+
+/** '2026-09-15' -> '15/09/2026' (para mensagens de erro legíveis). */
+function formatarDataBR(data) {
+  return (data || '').split('-').reverse().join('/');
+}
 
 // --- GERADOR DE ID ÚNICO DE RESERVA ---
 function generateBookingCode() {
@@ -40,6 +59,36 @@ function generateBookingCode() {
 const RESTRICTED_ROOM_ID = config.restrictedRoom.id; // ID da sala restrita
 const RESTRICTED_ROOM_EMAILS = config.restrictedRoom.allowedEmails; // Emails autorizados a reservar a sala restrita
 
+// --- SOLICITANTE (SALA RESTRITA) ---
+// A sala restrita só pode ser reservada pelos e-mails de RESTRICTED_ROOM_EMAILS,
+// mas quem vai USAR a sala normalmente é outra pessoa, que pediu a reserva.
+// Esse campo guarda o e-mail dela: é ele que aparece como "Responsável" nas
+// telas e recebe a confirmação. A posse da reserva continua com `userEmail`.
+const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Valida o solicitante informado. Só é aceito na sala restrita — nas outras
+ * salas quem reserva é quem usa, e um segundo responsável só confundiria.
+ * Retorna { email } ou { erro }.
+ */
+function validarSolicitante(roomId, solicitanteEmail) {
+  const email = (solicitanteEmail || '').trim().toLowerCase();
+
+  if (email.length === 0) return { email: null };
+
+  if (roomId !== RESTRICTED_ROOM_ID) {
+    // Ignora em silêncio em vez de recusar: o campo simplesmente não existe
+    // para as outras salas.
+    return { email: null };
+  }
+
+  if (!FORMATO_EMAIL.test(email)) {
+    return { erro: `"${solicitanteEmail}" não é um e-mail válido para o responsável.` };
+  }
+
+  return { email };
+}
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
@@ -50,6 +99,68 @@ const db = admin.firestore();
 
 app.use(cors());
 app.use(express.json());
+
+// ==========================================
+//        AUTENTICAÇÃO (ROTAS NOVAS)
+// ==========================================
+// As rotas de diretório devolvem nomes e e-mails de toda a organização —
+// dado pessoal. Por isso elas exigem um ID Token do Firebase, enviado
+// automaticamente pelo interceptor em client/src/api.js.
+//
+// As rotas antigas seguem sem verificação para não quebrar nada em produção;
+// migrá-las é um passo separado (ver README).
+
+/** Exige um usuário autenticado no Firebase do projeto. */
+async function requireAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+  if (!token) {
+    return res.status(401).json({ error: 'Autenticação necessária.' });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    const email = (decoded.email || '').toLowerCase();
+
+    if (!email) {
+      return res.status(403).json({ error: 'Conta sem e-mail associado.' });
+    }
+
+    const dominios = config.auth.allowedDomains;
+    if (dominios.length > 0) {
+      const dominio = email.split('@')[1] || '';
+      if (!dominios.includes(dominio)) {
+        return res.status(403).json({ error: 'Domínio não autorizado.' });
+      }
+    }
+
+    req.authUser = { email, uid: decoded.uid };
+    next();
+  } catch (error) {
+    console.error('Falha ao validar ID Token:', error.message);
+    return res.status(401).json({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
+  }
+}
+
+/** Exige que o usuário autenticado seja um dos admins configurados. */
+function requireAdmin(req, res, next) {
+  const admins = [config.admin.roomsAdmin, config.admin.bookingsReportAdmin]
+    .filter((email) => email && email.length > 0);
+
+  if (!admins.includes(req.authUser.email)) {
+    return res.status(403).json({ error: 'Acesso restrito à administração.' });
+  }
+  next();
+}
+
+/** Exige que o usuário autenticado seja da equipe de Suprimentos. */
+function requireFleetAdmin(req, res, next) {
+  if (!config.admin.fleetAdmins.includes(req.authUser.email)) {
+    return res.status(403).json({ error: 'Acesso restrito ao Suprimentos.' });
+  }
+  next();
+}
 
 // ==========================================
 //          ROTAS DE SALAS DE REUNIÃO
@@ -70,101 +181,206 @@ app.get('/rooms', async (req, res) => {
 // ROTA 2: Criar Reserva (POST)
 app.post('/bookings', async (req, res) => {
   try {
-    const { roomId, date, startTime, endTime, userEmail, roomName, attendees, title, notes, termConfirmed } = req.body;
+    const {
+      roomId, date, dates, startTime, endTime, userEmail, roomName,
+      attendees, title, notes, termConfirmed, solicitanteEmail
+    } = req.body;
 
-    if (!roomId || !date || !startTime || !endTime || !userEmail) {
+    if (!roomId || !startTime || !endTime || !userEmail) {
       return res.status(400).json({ error: 'Campos obrigatórios faltando.' });
+    }
+
+    // Aceita `date` (uma data) e/ou `dates` (várias). Uma reserva de vários
+    // dias é gravada como N documentos independentes — um por dia — unidos por
+    // um `serieId`. Isso mantém intactas todas as consultas que assumem uma
+    // data única por documento (agenda diária, visão mensal, busca, RSVP).
+    const datasSolicitadas = [
+      ...(date ? [date] : []),
+      ...(Array.isArray(dates) ? dates : [])
+    ]
+      .map((d) => (d || '').trim())
+      .filter((d) => FORMATO_DATA.test(d));
+
+    const datasUnicas = [...new Set(datasSolicitadas)].sort();
+
+    if (datasUnicas.length === 0) {
+      return res.status(400).json({ error: 'Informe pelo menos uma data válida (YYYY-MM-DD).' });
+    }
+
+    if (datasUnicas.length > MAX_DATAS_SERIE) {
+      return res.status(400).json({
+        error: `Máximo de ${MAX_DATAS_SERIE} dias por reserva. Selecione menos dias ou crie outra reserva.`
+      });
     }
 
     if (roomId === RESTRICTED_ROOM_ID && !RESTRICTED_ROOM_EMAILS.includes(userEmail)) {
       return res.status(403).json({ error: 'Esta sala é restrita apenas à administração.' });
     }
 
-    const startDateTime = new Date(`${date}T${startTime}:00`);
-    const endDateTime = new Date(`${date}T${endTime}:00`);
+    // Solicitante: na sala restrita, quem reserva (userEmail) não é quem vai
+    // usar a sala. `userEmail` continua sendo o dono — é ele quem edita,
+    // cancela e organiza o evento no Google — e o solicitante é quem aparece
+    // como responsável nas telas e recebe a confirmação por e-mail.
+    const solicitante = validarSolicitante(roomId, solicitanteEmail);
+    if (solicitante.erro) {
+      return res.status(400).json({ error: solicitante.erro });
+    }
 
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - 10);
-
-    if (startDateTime >= endDateTime) {
+    // O horário é o mesmo em todos os dias, então basta validar uma vez.
+    if (startTime >= endTime) {
       return res.status(400).json({ error: 'Horário final deve ser maior que o inicial.' });
     }
 
-    if (startDateTime < now) {
-      return res.status(400).json({ error: 'Não é possível criar reservas no passado.' });
+    const limiteDoPassado = new Date();
+    limiteDoPassado.setMinutes(limiteDoPassado.getMinutes() - 10);
+
+    const datasNoPassado = datasUnicas.filter(
+      (d) => new Date(`${d}T${startTime}:00`) < limiteDoPassado
+    );
+
+    if (datasNoPassado.length > 0) {
+      return res.status(400).json({
+        error: datasUnicas.length === 1
+          ? 'Não é possível criar reservas no passado.'
+          : `Estes dias já passaram: ${datasNoPassado.map(formatarDataBR).join(', ')}.`,
+        datasInvalidas: datasNoPassado
+      });
     }
 
-    let attendeesList = [];
-    if (attendees && attendees.trim().length > 0) {
-      attendeesList = attendees
-        .split(',')
-        .map(e => e.trim())
-        .filter(e => e !== '');
-    }
-
+    // Checa TODOS os dias antes de gravar qualquer coisa: criar metade da série
+    // e falhar no meio deixaria o usuário sem saber quais dias tem de fato.
     const bookingsRef = db.collection('bookings');
-    const snapshot = await bookingsRef
-      .where('roomId', '==', roomId)
-      .where('date', '==', date)
-      .get();
+    const snapshot = await bookingsRef.where('roomId', '==', roomId).get();
 
-    let conflito = false;
-    snapshot.forEach(doc => {
-      const reserva = doc.data();
-      const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
-      const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
-      if (startDateTime < rEnd && endDateTime > rStart) conflito = true;
-    });
+    const conflitos = [];
+    for (const dia of datasUnicas) {
+      const inicio = new Date(`${dia}T${startTime}:00`);
+      const fim = new Date(`${dia}T${endTime}:00`);
 
-    if (conflito) {
-      return res.status(409).json({ error: 'Já existe uma reserva neste horário!' });
+      const ocupado = snapshot.docs.some((doc) => {
+        const reserva = doc.data();
+        if (reserva.date !== dia) return false;
+        const rStart = new Date(`${reserva.date}T${reserva.startTime}:00`);
+        const rEnd = new Date(`${reserva.date}T${reserva.endTime}:00`);
+        return inicio < rEnd && fim > rStart;
+      });
+
+      if (ocupado) conflitos.push(dia);
     }
+
+    if (conflitos.length > 0) {
+      return res.status(409).json({
+        error: datasUnicas.length === 1
+          ? 'Já existe uma reserva neste horário!'
+          : `A sala já está ocupada neste horário em: ${conflitos.map(formatarDataBR).join(', ')}. Nenhum dia foi reservado.`,
+        conflitos
+      });
+    }
+
+    // Expande grupos (do painel e Google Groups) em pessoas. O texto original
+    // digitado pelo usuário continua salvo em `attendees`, para que a edição
+    // da reserva mostre o grupo em vez de dezenas de e-mails soltos.
+    // Resolvido uma única vez e reutilizado em todos os dias da série.
+    const convidados = await emailGroups.resolverConvidados(attendees);
+    const attendeesList = convidados.emails;
 
     const guestStatuses = {};
     attendeesList.forEach(email => {
       guestStatuses[email] = 'pendente';
     });
 
-    const novaReserva = {
-      roomId,
-      roomName,
-      date,
-      startTime,
-      endTime,
-      userEmail,
-      title: title || 'Reunião Reservada',
-      notes: notes || '',
-      attendees: attendees || '',
-      convidados: attendeesList,
-      guestStatuses,
-      termConfirmed: termConfirmed === true || termConfirmed === 'true',
-      createdAt: new Date().toISOString()
-    };
+    const ehSerie = datasUnicas.length > 1;
+    const serieId = ehSerie ? `serie-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : null;
+    const criadoEm = new Date().toISOString();
 
-    const docRef = await bookingsRef.add(novaReserva);
+    const criadas = [];
+    const falhas = [];
 
-    const googleEvent = await createCalendarEvent({ ...novaReserva, attendeesList });
+    for (const dia of datasUnicas) {
+      const novaReserva = {
+        roomId,
+        roomName,
+        date: dia,
+        startTime,
+        endTime,
+        userEmail,
+        title: title || 'Reunião Reservada',
+        notes: notes || '',
+        attendees: attendees || '',
+        convidados: attendeesList,
+        guestStatuses: { ...guestStatuses },
+        termConfirmed: termConfirmed === true || termConfirmed === 'true',
+        createdAt: criadoEm
+      };
 
-    // Guarda os identificadores do evento do Google para permitir
-    // atualizar/cancelar esse mesmo evento depois.
-    if (googleEvent && googleEvent.eventId) {
-      await docRef.update({
-        googleEventId: googleEvent.eventId,
-        googleCalendarId: googleEvent.calendarId
+      if (solicitante.email) {
+        novaReserva.solicitanteEmail = solicitante.email;
+      }
+
+      // Campos da série só existem quando há mais de um dia, para não poluir
+      // as reservas simples que são a maioria.
+      if (ehSerie) {
+        novaReserva.serieId = serieId;
+        novaReserva.serieDatas = datasUnicas;
+      }
+
+      const docRef = await bookingsRef.add(novaReserva);
+
+      // Um evento (e portanto um convite) por dia, como pedido: cada dia pode
+      // ser aceito, recusado ou remarcado de forma independente.
+      const googleEvent = await createCalendarEvent({ ...novaReserva, attendeesList });
+
+      if (googleEvent && googleEvent.eventId) {
+        await docRef.update({
+          googleEventId: googleEvent.eventId,
+          googleCalendarId: googleEvent.calendarId
+        });
+      } else {
+        // A reserva existe no sistema, mas o convite não saiu. Precisa aparecer
+        // na resposta em vez de passar por confirmada.
+        falhas.push(dia);
+      }
+
+      criadas.push({
+        id: docRef.id,
+        date: dia,
+        googleEventLink: googleEvent ? googleEvent.htmlLink : null
       });
     }
 
-    // Envia confirmação apenas ao organizador. Os convidados recebem o
-    // convite que adiciona o evento na agenda automaticamente, via Google.
+    // Uma única confirmação ao organizador, listando todos os dias — não faz
+    // sentido encher a caixa dele com um e-mail por dia. Os convidados recebem
+    // os convites pela Google Agenda, um por dia.
+    //
+    // Havendo solicitante, ele recebe a mesma confirmação: é ele quem vai usar
+    // a sala e precisa ter o registro por escrito.
     await sendBookingConfirmationEmail({
-      ...novaReserva,
-      googleEventLink: googleEvent ? googleEvent.htmlLink : null
+      roomName,
+      userEmail,
+      solicitanteEmail: solicitante.email,
+      title: title || 'Reunião Reservada',
+      notes: notes || '',
+      date: datasUnicas[0],
+      datas: datasUnicas,
+      startTime,
+      endTime,
+      convidados: attendeesList,
+      googleEventLink: criadas[0] ? criadas[0].googleEventLink : null
     });
 
     res.status(201).json({
       success: true,
-      message: 'Sala reservada com sucesso!',
-      googleEventLink: googleEvent ? googleEvent.htmlLink : null
+      message: ehSerie
+        ? `Sala reservada em ${criadas.length} dias!`
+        : 'Sala reservada com sucesso!',
+      googleEventLink: criadas[0] ? criadas[0].googleEventLink : null,
+      serieId,
+      criadas,
+      totalDias: criadas.length,
+      conviteNaoEnviado: falhas,
+      totalConvidados: attendeesList.length,
+      gruposExpandidos: convidados.gruposUsados,
+      naoResolvidos: convidados.naoResolvidos
     });
   } catch (error) {
     console.error('Erro na rota de reserva:', error);
@@ -222,9 +438,18 @@ app.post('/calendar/freebusy', async (req, res) => {
       return res.status(400).json({ error: 'date, startTime e endTime são obrigatórios.' });
     }
 
-    const lista = Array.isArray(emails)
+    const recebidos = Array.isArray(emails)
       ? emails.map(e => (e || '').trim()).filter(e => e !== '')
       : [];
+
+    if (recebidos.length === 0) {
+      return res.json({ busy: {}, conflitos: [] });
+    }
+
+    // O front já expande os grupos antes de chamar, mas resolvemos de novo aqui
+    // para que um token de grupo nunca vá para a consulta free/busy como se
+    // fosse uma pessoa (o Google devolveria erro para aquele "calendário").
+    const { emails: lista } = await emailGroups.resolverConvidados(recebidos.join(','));
 
     if (lista.length === 0) {
       return res.json({ busy: {}, conflitos: [] });
@@ -261,18 +486,58 @@ app.delete('/bookings/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permissão negada. Apenas o dono ou Admin podem cancelar.' });
     }
 
-    await docRef.delete();
+    // `escopo=serie` cancela todos os dias restantes da série de uma vez —
+    // sem isso, cancelar uma reserva de 10 dias exigiria 10 cancelamentos.
+    const escopo = req.query?.escopo || req.body?.escopo;
+    const cancelarSerie = escopo === 'serie' && bookingData.serieId;
 
-    // Remove o evento do Google Agenda. O próprio Google notifica os
-    // convidados sobre o cancelamento (sendUpdates: 'all').
-    if (bookingData.googleEventId) {
-      await deleteCalendarEvent(
-        bookingData.googleCalendarId || bookingData.userEmail,
-        bookingData.googleEventId
-      );
+    let paraCancelar = [{ id: docRef.id, ref: docRef, dados: bookingData }];
+
+    if (cancelarSerie) {
+      const daSerie = await db.collection('bookings')
+        .where('serieId', '==', bookingData.serieId)
+        .get();
+
+      const hoje = new Date().toISOString().split('T')[0];
+
+      paraCancelar = daSerie.docs
+        // Dias que já aconteceram ficam como histórico; cancelar o passado não
+        // faz sentido e removeria o registro de um uso que de fato ocorreu.
+        .filter((d) => (d.data().date || '') >= hoje)
+        // Um admin pode cancelar a reserva de outra pessoa, mas não deve
+        // arrastar consigo dias de uma série que não é dele.
+        .filter((d) => !userEmail || d.data().userEmail === bookingData.userEmail)
+        .map((d) => ({ id: d.id, ref: d.ref, dados: d.data() }));
+
+      // Garante que o dia clicado entre na lista mesmo se for anterior a hoje.
+      if (!paraCancelar.some((item) => item.id === docRef.id)) {
+        paraCancelar.push({ id: docRef.id, ref: docRef, dados: bookingData });
+      }
     }
 
-    res.json({ success: true, message: 'Reserva cancelada.' });
+    const canceladas = [];
+    for (const item of paraCancelar) {
+      await item.ref.delete();
+
+      // Remove o evento do Google Agenda. O próprio Google notifica os
+      // convidados sobre o cancelamento (sendUpdates: 'all').
+      if (item.dados.googleEventId) {
+        await deleteCalendarEvent(
+          item.dados.googleCalendarId || item.dados.userEmail,
+          item.dados.googleEventId
+        );
+      }
+      canceladas.push(item.dados.date);
+    }
+
+    res.json({
+      success: true,
+      message: canceladas.length > 1
+        ? `${canceladas.length} dias cancelados.`
+        : 'Reserva cancelada.',
+      totalCancelado: canceladas.length,
+      datasCanceladas: canceladas.sort()
+    });
   } catch (error) {
     console.error('Erro ao cancelar reserva:', error);
     res.status(500).json({ error: 'Erro interno ao cancelar.' });
@@ -283,7 +548,7 @@ app.delete('/bookings/:id', async (req, res) => {
 app.put('/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, startTime, endTime, attendees, title, userEmail, roomId, notes } = req.body;
+    const { date, startTime, endTime, attendees, title, userEmail, roomId, notes, solicitanteEmail } = req.body;
 
     const docRef = db.collection('bookings').doc(id);
     const doc = await docRef.get();
@@ -332,13 +597,11 @@ app.put('/bookings/:id', async (req, res) => {
       return res.status(409).json({ error: 'Novo horário indisponível!' });
     }
 
-    let attendeesList = [];
-    if (attendees && attendees.trim().length > 0) {
-      attendeesList = attendees
-        .split(',')
-        .map(e => e.trim())
-        .filter(e => e !== '');
-    }
+    // Mesma expansão de grupos da criação. Como o token do grupo fica salvo em
+    // `attendees`, editar uma reserva antiga reexpande o grupo com os membros
+    // ATUAIS — quem entrou depois passa a ser convidado, quem saiu deixa de ser.
+    const convidados = await emailGroups.resolverConvidados(attendees);
+    const attendeesList = convidados.emails;
 
     const previousStatuses = currentData.guestStatuses || {};
     const guestStatuses = {};
@@ -360,6 +623,16 @@ app.put('/bookings/:id', async (req, res) => {
       guestStatuses
     };
 
+    // Solicitante da sala restrita: se o campo não vier na requisição, mantém
+    // o que já estava gravado — só é alterado quando enviado de propósito.
+    if (solicitanteEmail !== undefined) {
+      const solicitante = validarSolicitante(targetRoomId, solicitanteEmail);
+      if (solicitante.erro) {
+        return res.status(400).json({ error: solicitante.erro });
+      }
+      updatedData.solicitanteEmail = solicitante.email || null;
+    }
+
     await docRef.update(updatedData);
 
     // Atualiza o evento no Google Agenda. Se a reserva ainda não tiver um
@@ -367,6 +640,11 @@ app.put('/bookings/:id', async (req, res) => {
     const dadosEvento = {
       ...updatedData,
       userEmail: currentData.userEmail,
+      // Sem isto, editar sem mexer no responsável apagaria o nome dele da
+      // descrição do evento no Google.
+      solicitanteEmail: updatedData.solicitanteEmail !== undefined
+        ? updatedData.solicitanteEmail
+        : currentData.solicitanteEmail,
       attendeesList,
       googleEventId: currentData.googleEventId,
       googleCalendarId: currentData.googleCalendarId
@@ -387,7 +665,13 @@ app.put('/bookings/:id', async (req, res) => {
     // A atualização/criação do evento no Google já notifica os convidados
     // (sendUpdates: 'all'), então não enviamos e-mail próprio aqui.
 
-    res.json({ success: true, message: 'Reserva atualizada com sucesso!' });
+    res.json({
+      success: true,
+      message: 'Reserva atualizada com sucesso!',
+      totalConvidados: attendeesList.length,
+      gruposExpandidos: convidados.gruposUsados,
+      naoResolvidos: convidados.naoResolvidos
+    });
   } catch (error) {
     console.error('Erro ao atualizar reserva:', error);
     res.status(500).json({ error: 'Erro ao atualizar.' });
@@ -525,6 +809,231 @@ app.get('/bookings/admin', async (req, res) => {
   } catch (error) {
     console.error('Erro ao buscar reservas (admin):', error);
     res.status(500).json({ error: 'Erro interno.' });
+  }
+});
+
+// ROTA: Situação de cada convidado de uma reserva.
+//
+// A fonte principal é o próprio evento no Google Calendar, porque é lá que
+// cai a resposta de quem clicou "Sim/Não" no convite que chegou por e-mail.
+// O RSVP feito dentro do sistema (guestStatuses) entra como complemento, para
+// quem respondeu pela tela e ainda não apareceu no evento.
+app.get('/bookings/:id/convidados', requireAuth, async (req, res) => {
+  try {
+    const doc = await db.collection('bookings').doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Reserva não encontrada.' });
+
+    const reserva = doc.data();
+    const solicitante = req.authUser.email;
+    const convidados = Array.isArray(reserva.convidados) ? reserva.convidados : [];
+
+    // Só quem participa da reserva (ou um admin) pode ver a lista de respostas.
+    const admins = [config.admin.roomsAdmin, config.admin.bookingsReportAdmin].filter(Boolean);
+    const podeVer =
+      reserva.userEmail === solicitante ||
+      reserva.solicitanteEmail === solicitante ||
+      convidados.includes(solicitante) ||
+      admins.includes(solicitante);
+
+    if (!podeVer) {
+      return res.status(403).json({ error: 'Você não participa desta reserva.' });
+    }
+
+    const statusLocal = reserva.guestStatuses || {};
+
+    const doGoogle = await getEventAttendees(
+      reserva.googleCalendarId || reserva.userEmail,
+      reserva.googleEventId
+    );
+
+    const porEmailNoGoogle = new Map();
+    if (doGoogle) {
+      doGoogle
+        .filter((pessoa) => !pessoa.organizador)
+        .forEach((pessoa) => porEmailNoGoogle.set(pessoa.email, pessoa.resposta));
+    }
+
+    const lista = convidados.map((email) => {
+      const respostaGoogle = porEmailNoGoogle.get(email.toLowerCase());
+
+      if (respostaGoogle) {
+        return { email, status: respostaGoogle, origem: 'google' };
+      }
+
+      const local = statusLocal[email];
+      if (local && local !== 'pendente') {
+        return { email, status: local, origem: 'sistema' };
+      }
+
+      return { email, status: 'pendente', origem: doGoogle ? 'google' : 'sistema' };
+    });
+
+    const contagem = lista.reduce((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      convidados: lista,
+      contagem,
+      // Avisa a tela quando não deu para ler o evento, para ela não apresentar
+      // "pendente" como se fosse uma resposta confirmada.
+      googleDisponivel: doGoogle !== null,
+      temEvento: Boolean(reserva.googleEventId)
+    });
+  } catch (error) {
+    console.error('Erro ao consultar situação dos convidados:', error);
+    res.status(500).json({ error: 'Erro ao consultar a situação dos convidados.' });
+  }
+});
+
+// ==========================================
+//     ROTAS DE DIRETÓRIO E GRUPOS DE E-MAIL
+// ==========================================
+
+// ROTA: Colaboradores da organização (alimenta o autocomplete de convidados).
+// Fonte: Google Workspace via Admin SDK. Se a integração estiver desligada ou
+// falhar, devolve lista vazia com um aviso — o front usa o fallback local.
+app.get('/directory/users', requireAuth, async (req, res) => {
+  if (!directory.isEnabled()) {
+    return res.json({
+      users: [],
+      fonte: 'desativada',
+      aviso: 'Integração com o diretório do Workspace não configurada (DIRECTORY_ADMIN_SUBJECT).'
+    });
+  }
+
+  try {
+    const users = await directory.listUsers();
+    res.json({ users, fonte: 'workspace', aviso: null });
+  } catch (error) {
+    const aviso = directory.explainError(error);
+    console.error('Erro ao listar usuários do diretório:', aviso);
+    res.json({ users: [], fonte: 'erro', aviso });
+  }
+});
+
+// ROTA: Grupos disponíveis para convite — os do painel + os Google Groups.
+// Os membros vêm junto para o front poder checar free/busy por pessoa sem
+// precisar de outra chamada.
+app.get('/directory/groups', requireAuth, async (req, res) => {
+  try {
+    const { doPainel, doGoogle, avisoGoogle } = await emailGroups.listarTodosGrupos();
+
+    const grupos = [
+      ...doPainel.map((g) => ({
+        id: g.id,
+        token: `${emailGroups.PREFIXO_TOKEN}${g.slug}`,
+        nome: g.nome,
+        descricao: g.descricao,
+        tipo: 'painel',
+        membros: g.membros,
+      })),
+      ...doGoogle.map((g) => ({
+        id: g.id,
+        token: g.email,
+        nome: g.nome,
+        descricao: g.descricao,
+        tipo: 'google',
+        membros: g.membros,
+      })),
+    ];
+
+    res.json({ grupos, aviso: avisoGoogle });
+  } catch (error) {
+    console.error('Erro ao listar grupos:', error);
+    res.status(500).json({ error: 'Erro ao listar grupos de e-mail.' });
+  }
+});
+
+// ROTA: Descarta o cache do diretório (botão de atualizar no painel).
+app.post('/directory/refresh', requireAuth, requireAdmin, (req, res) => {
+  directory.invalidateCache();
+  res.json({ success: true, message: 'Cache do diretório limpo.' });
+});
+
+// ROTA: Diagnóstico da integração — mostra o que falta configurar no Google.
+app.get('/directory/status', requireAuth, requireAdmin, async (req, res) => {
+  const status = {
+    configurado: directory.isEnabled(),
+    adminSubject: config.directory.adminSubject || null,
+    serviceAccountClientId: directory.serviceAccountClientId,
+    cacheTtlMinutes: config.directory.cacheTtlMinutes,
+    usuarios: { ok: false, total: 0, erro: null },
+    grupos: { ok: false, total: 0, erro: null },
+  };
+
+  if (!status.configurado) {
+    status.usuarios.erro = 'DIRECTORY_ADMIN_SUBJECT não definido em api/.env.';
+    status.grupos.erro = status.usuarios.erro;
+    return res.json(status);
+  }
+
+  try {
+    const users = await directory.listUsers();
+    status.usuarios = { ok: true, total: users.length, erro: null };
+  } catch (error) {
+    status.usuarios.erro = directory.explainError(error);
+  }
+
+  try {
+    const grupos = await directory.listGoogleGroups();
+    status.grupos = { ok: true, total: grupos.length, erro: null };
+  } catch (error) {
+    status.grupos.erro = directory.explainError(error);
+  }
+
+  res.json(status);
+});
+
+// ROTA: Lista os grupos criados no painel (visão de administração).
+app.get('/admin/email-groups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const grupos = await emailGroups.listarGruposPainel();
+    res.json(grupos);
+  } catch (error) {
+    console.error('Erro ao listar grupos do painel:', error);
+    res.status(500).json({ error: 'Erro ao listar grupos.' });
+  }
+});
+
+// ROTA: Cria um grupo no painel.
+app.post('/admin/email-groups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nome, descricao, membros } = req.body;
+    const grupo = await emailGroups.criarGrupo({
+      nome,
+      descricao,
+      membros,
+      criadoPor: req.authUser.email,
+    });
+    res.status(201).json(grupo);
+  } catch (error) {
+    console.error('Erro ao criar grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao criar grupo.' });
+  }
+});
+
+// ROTA: Edita um grupo do painel.
+app.put('/admin/email-groups/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nome, descricao, membros } = req.body;
+    const grupo = await emailGroups.atualizarGrupo(req.params.id, { nome, descricao, membros });
+    res.json(grupo);
+  } catch (error) {
+    console.error('Erro ao atualizar grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao atualizar grupo.' });
+  }
+});
+
+// ROTA: Remove um grupo do painel.
+app.delete('/admin/email-groups/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await emailGroups.removerGrupo(req.params.id);
+    res.json({ success: true, message: 'Grupo removido.' });
+  } catch (error) {
+    console.error('Erro ao remover grupo:', error.message);
+    res.status(error.status || 500).json({ error: error.message || 'Erro ao remover grupo.' });
   }
 });
 
@@ -1104,6 +1613,202 @@ app.delete('/car_costs/:id', async (req, res) => {
   } catch (error) {
     console.error('Erro ao excluir custo:', error);
     res.status(500).json({ error: 'Erro ao excluir o custo.' });
+  }
+});
+
+// ==========================================
+//     DOCUMENTOS DA FROTA (ABA DOCUMENTOS)
+// ==========================================
+// O Suprimentos cadastra links de PDFs do Google Drive (restritos ao
+// domínio); a API lê os arquivos com a Service Account e repassa o conteúdo
+// para quem está logado. Ver api/driveDocuments.js.
+
+const CAR_DOCUMENTS = 'car_documents';
+const MAX_TITULO_DOCUMENTO = 120;
+
+/**
+ * Formato devolvido ao frontend. O link vai junto para o botão "Abrir no
+ * Drive", que só funciona para quem é do domínio.
+ */
+function serializarDocumento(doc) {
+  const data = doc.data();
+  return {
+    id: doc.id,
+    titulo: data.titulo,
+    link: data.link,
+    nomeArquivo: data.nomeArquivo || '',
+    ordem: data.ordem ?? 0,
+    atualizadoEm: data.updatedAt || data.createdAt || null,
+  };
+}
+
+/**
+ * Valida título + link e confere no Drive se o arquivo existe, é legível pela
+ * Service Account e pode ser exibido como PDF. Retorna os campos a gravar
+ * ou { erro, status }.
+ */
+async function validarDocumento({ titulo, link }) {
+  const tituloLimpo = String(titulo || '').trim();
+  if (!tituloLimpo) return { erro: 'Informe um título para o documento.', status: 400 };
+  if (tituloLimpo.length > MAX_TITULO_DOCUMENTO) {
+    return { erro: `O título pode ter no máximo ${MAX_TITULO_DOCUMENTO} caracteres.`, status: 400 };
+  }
+
+  if (String(link || '').includes('/folders/')) {
+    return { erro: 'Esse é o link de uma pasta. Abra o PDF no Drive e copie o link do próprio arquivo.', status: 400 };
+  }
+
+  const fileId = driveDocuments.extractFileId(link);
+  if (!fileId) {
+    return { erro: 'Link do Google Drive não reconhecido. Use o link do botão "Copiar link" do arquivo.', status: 400 };
+  }
+
+  const resourceKey = driveDocuments.extractResourceKey(link);
+
+  let meta;
+  try {
+    meta = await driveDocuments.getFileMeta(fileId, resourceKey);
+  } catch (error) {
+    console.error('Erro ao consultar arquivo no Drive:', error.message);
+    return { erro: driveDocuments.explainError(error), status: 422 };
+  }
+
+  if (!driveDocuments.isSupportedMime(meta.mimeType)) {
+    return { erro: `"${meta.name}" não é um PDF nem um arquivo do Google Docs/Apresentações.`, status: 422 };
+  }
+
+  return {
+    campos: {
+      titulo: tituloLimpo,
+      link: String(link).trim(),
+      fileId,
+      resourceKey,
+      mimeType: meta.mimeType,
+      nomeArquivo: meta.name,
+    },
+  };
+}
+
+// ROTA: Listar documentos (qualquer usuário logado)
+app.get('/car-documents', requireAuth, async (req, res) => {
+  try {
+    const snapshot = await db.collection(CAR_DOCUMENTS).orderBy('ordem').get();
+    res.json({
+      documentos: snapshot.docs.map(serializarDocumento),
+      // Só o Suprimentos precisa saber como liberar o acesso aos arquivos.
+      leitura: config.admin.fleetAdmins.includes(req.authUser.email)
+        ? driveDocuments.leitura
+        : undefined,
+    });
+  } catch (error) {
+    console.error('Erro ao listar documentos:', error);
+    res.status(500).json({ error: 'Erro ao buscar os documentos.' });
+  }
+});
+
+// ROTA: Conteúdo do documento em PDF (qualquer usuário logado)
+app.get('/car-documents/:id/pdf', requireAuth, async (req, res) => {
+  try {
+    const doc = await db.collection(CAR_DOCUMENTS).doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Documento não encontrado.' });
+
+    const { fileId, mimeType, resourceKey, titulo } = doc.data();
+    const stream = await driveDocuments.openPdfStream(fileId, mimeType, resourceKey);
+
+    const nome = `${titulo}.pdf`.replace(/["\\\r\n]/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    stream.on('error', (error) => {
+      console.error('Erro ao transmitir PDF do Drive:', error.message);
+      res.destroy(error);
+    });
+    stream.pipe(res);
+  } catch (error) {
+    console.error('Erro ao abrir documento do Drive:', error.message);
+    res.status(502).json({ error: driveDocuments.explainError(error) });
+  }
+});
+
+// ROTA: Cadastrar documento (Suprimentos)
+app.post('/car-documents', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const resultado = await validarDocumento(req.body || {});
+    if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+
+    // Novo documento entra no fim da lista.
+    const ultimo = await db.collection(CAR_DOCUMENTS).orderBy('ordem', 'desc').limit(1).get();
+    const ordem = ultimo.empty ? 0 : (ultimo.docs[0].data().ordem ?? 0) + 1;
+
+    const agora = new Date().toISOString();
+    const ref = await db.collection(CAR_DOCUMENTS).add({
+      ...resultado.campos,
+      ordem,
+      createdAt: agora,
+      createdBy: req.authUser.email,
+      updatedAt: agora,
+      updatedBy: req.authUser.email,
+    });
+
+    res.status(201).json({ documento: serializarDocumento(await ref.get()) });
+  } catch (error) {
+    console.error('Erro ao cadastrar documento:', error);
+    res.status(500).json({ error: 'Erro ao cadastrar o documento.' });
+  }
+});
+
+// ROTA: Reordenar documentos (Suprimentos). Recebe { ids: [...] } na nova ordem.
+// Declarada antes de /:id para "ordem" não ser lido como um ID.
+app.put('/car-documents/ordem', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
+    const snapshot = await db.collection(CAR_DOCUMENTS).get();
+    const existentes = new Set(snapshot.docs.map((d) => d.id));
+
+    if (ids.length !== existentes.size || !ids.every((id) => existentes.has(id))) {
+      return res.status(409).json({ error: 'A lista mudou enquanto você reordenava. Recarregue a tela.' });
+    }
+
+    const batch = db.batch();
+    ids.forEach((id, ordem) => batch.update(db.collection(CAR_DOCUMENTS).doc(id), { ordem }));
+    await batch.commit();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao reordenar documentos:', error);
+    res.status(500).json({ error: 'Erro ao salvar a nova ordem.' });
+  }
+});
+
+// ROTA: Editar documento (Suprimentos)
+app.put('/car-documents/:id', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const ref = db.collection(CAR_DOCUMENTS).doc(req.params.id);
+    if (!(await ref.get()).exists) return res.status(404).json({ error: 'Documento não encontrado.' });
+
+    const resultado = await validarDocumento(req.body || {});
+    if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+
+    await ref.update({
+      ...resultado.campos,
+      updatedAt: new Date().toISOString(),
+      updatedBy: req.authUser.email,
+    });
+    res.json({ documento: serializarDocumento(await ref.get()) });
+  } catch (error) {
+    console.error('Erro ao editar documento:', error);
+    res.status(500).json({ error: 'Erro ao salvar o documento.' });
+  }
+});
+
+// ROTA: Remover documento (Suprimentos). Só tira da aba; o arquivo no Drive fica intacto.
+app.delete('/car-documents/:id', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    await db.collection(CAR_DOCUMENTS).doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao remover documento:', error);
+    res.status(500).json({ error: 'Erro ao remover o documento.' });
   }
 });
 

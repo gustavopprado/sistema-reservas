@@ -30,14 +30,37 @@ function getAuthClient(subject) {
 
 function buildEventResource(bookingData) {
   const displayTitle = bookingData.title || 'Reunião Reservada';
-  const attendees = Array.isArray(bookingData.attendeesList)
-    ? bookingData.attendeesList
-        .filter((email) => email && email !== bookingData.userEmail)
-        .map((email) => ({ email }))
-    : [];
+  const organizador = (bookingData.userEmail || '').trim().toLowerCase();
+  const solicitante = (bookingData.solicitanteEmail || '').trim().toLowerCase();
+
+  // Na sala restrita, quem reserva não é quem vai usar a sala. O responsável
+  // precisa entrar como convidado do evento — é isso que faz o Google mandar
+  // o convite e colocar a reserva na agenda dele. Citá-lo apenas na descrição
+  // não agenda nada para ninguém.
+  //
+  // Ele vem primeiro na lista porque é o dono de fato da reserva.
+  const vistos = new Set();
+  const attendees = [
+    ...(solicitante ? [solicitante] : []),
+    ...(Array.isArray(bookingData.attendeesList) ? bookingData.attendeesList : [])
+  ]
+    .map((email) => (email || '').trim().toLowerCase())
+    .filter((email) => {
+      // O organizador já é dono do evento, e e-mail repetido duplica convite.
+      if (email.length === 0 || email === organizador || vistos.has(email)) return false;
+      vistos.add(email);
+      return true;
+    })
+    .map((email) => ({ email }));
 
   const pauta = (bookingData.notes && bookingData.notes.trim().length > 0)
     ? `\n\nPauta / Anotações:\n${bookingData.notes}`
+    : '';
+
+  // Na sala restrita, quem reserva não é quem vai usar a sala; o evento precisa
+  // dizer isso, senão só aparece o nome de quem reservou.
+  const responsavel = bookingData.solicitanteEmail
+    ? `\nResponsável pela sala: ${bookingData.solicitanteEmail}`
     : '';
 
   return {
@@ -45,6 +68,7 @@ function buildEventResource(bookingData) {
     description:
       `Reserva de sala criada pelo Sistema de Reservas.\n` +
       `Organizador: ${bookingData.userEmail}` +
+      responsavel +
       pauta,
     location: bookingData.roomName,
     start: {
@@ -188,10 +212,57 @@ async function getFreeBusy(requesterEmail, emails, timeMin, timeMax) {
   }
 }
 
+/**
+ * Lê a resposta de cada convidado direto do evento no Google Calendar.
+ *
+ * É a única fonte que sabe quem aceitou pelo convite que chegou por e-mail —
+ * o RSVP feito dentro do sistema grava apenas no Firestore, e a maioria das
+ * pessoas responde pelo Gmail/Agenda, não pela tela.
+ *
+ * Retorna [{ email, resposta, organizador }] com `resposta` em:
+ * 'aceito' | 'recusado' | 'talvez' | 'pendente'.
+ * Devolve null se o evento não puder ser lido (evento apagado, delegação fora
+ * do ar), para o chamador saber que não há dado em vez de assumir "pendente".
+ */
+async function getEventAttendees(organizerEmail, eventId) {
+  if (!eventId) return null;
+
+  // Traducao dos valores da API do Google.
+  const RESPOSTAS = {
+    accepted: 'aceito',
+    declined: 'recusado',
+    tentative: 'talvez',
+    needsAction: 'pendente',
+  };
+
+  try {
+    const authClient = getAuthClient(organizerEmail);
+    const calendar = google.calendar({ version: 'v3', auth: authClient });
+
+    const response = await calendar.events.get({
+      calendarId: 'primary',
+      eventId,
+    });
+
+    const attendees = Array.isArray(response.data.attendees) ? response.data.attendees : [];
+
+    return attendees.map((pessoa) => ({
+      email: (pessoa.email || '').toLowerCase(),
+      resposta: RESPOSTAS[pessoa.responseStatus] || 'pendente',
+      organizador: pessoa.organizer === true,
+    }));
+  } catch (error) {
+    console.error('❌ Erro ao ler respostas do evento no Google Calendar:', error.message);
+    if (error.response) console.error(error.response.data);
+    return null;
+  }
+}
+
 module.exports = {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
   getFreeBusy,
+  getEventAttendees,
   SHARED_CALENDAR_ID,
 };

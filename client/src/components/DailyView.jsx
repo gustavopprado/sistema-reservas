@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../api';
 import { Clock, ChevronLeft, ChevronRight, Edit3, Calendar } from 'lucide-react';
 import { ROOM_ADMIN_EMAIL } from '../config';
+import { responsavelDe, temSolicitante } from '../bookingDisplay';
 
 export default function DailyView({ rooms, onReserve, onEditBooking, currentUserEmail }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
@@ -118,7 +119,14 @@ export default function DailyView({ rooms, onReserve, onEditBooking, currentUser
                              <span>{booking.title || 'Reservado'}</span>
                              {isAdmin && <Edit3 size={12} />}
                            </div>
-                           <div className="text-red-500 truncate">{booking.userEmail}</div>
+                           <div
+                             className="text-red-500 truncate"
+                             title={temSolicitante(booking)
+                               ? `Responsável: ${booking.solicitanteEmail}\nReservado por: ${booking.userEmail}`
+                               : booking.userEmail}
+                           >
+                             {responsavelDe(booking)}
+                           </div>
                         </div>
                       ) : (
                         // CÉLULA LIVRE (INATIVA)

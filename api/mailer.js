@@ -26,13 +26,41 @@ async function sendBookingConfirmationEmail(bookingData) {
   const displayTitle = bookingData.title || 'Reunião';
   const dataFmt = bookingData.date.split('-').reverse().join('/');
 
+  // Uma reserva pode cobrir vários dias no mesmo horário. Nesse caso vai um
+  // único e-mail listando todos os dias, em vez de um e-mail por dia.
+  const datas = Array.isArray(bookingData.datas) && bookingData.datas.length > 0
+    ? bookingData.datas
+    : [bookingData.date];
+
+  const ehSerie = datas.length > 1;
+
   const convidados = Array.isArray(bookingData.convidados) && bookingData.convidados.length > 0
     ? bookingData.convidados.join(', ')
     : 'Nenhum';
 
+  const blocoDatas = ehSerie
+    ? `<p style="margin-bottom:4px;"><strong>Dias reservados (${datas.length}):</strong></p>
+       <ul style="margin:0 0 12px 0; padding-left:20px; color:#334155;">
+         ${datas.map((d) => `<li>${d.split('-').reverse().join('/')}</li>`).join('')}
+       </ul>`
+    : `<p><strong>Data:</strong> ${dataFmt}</p>`;
+
   const notasBloco = bookingData.notes && bookingData.notes.trim().length > 0
     ? `<p style="margin-bottom:4px;"><strong>Anotações / Pauta:</strong></p>
        <p style="white-space: pre-wrap; background:#f8fafc; border:1px solid #e2e8f0; padding:10px; border-radius:6px; color:#334155;">${bookingData.notes}</p>`
+    : '';
+
+  // Na sala restrita, quem reserva não é quem vai usar a sala. O solicitante
+  // recebe a mesma confirmação, e o e-mail deixa claro quem reservou por ele.
+  const solicitante = (bookingData.solicitanteEmail || '').trim();
+
+  const destinatarios = solicitante
+    ? [bookingData.userEmail, solicitante].join(', ')
+    : bookingData.userEmail;
+
+  const blocoResponsavel = solicitante
+    ? `<p><strong>Responsável pela sala:</strong> ${solicitante}</p>
+       <p style="font-size:12px; color:#666;">Reserva feita por ${bookingData.userEmail} a pedido de ${solicitante}.</p>`
     : '';
 
   const linkBloco = bookingData.googleEventLink
@@ -42,16 +70,19 @@ async function sendBookingConfirmationEmail(bookingData) {
   try {
     await transporter.sendMail({
       from: FROM_ROOMS,
-      to: bookingData.userEmail,
-      subject: `Reserva confirmada: ${displayTitle} - ${dataFmt} às ${bookingData.startTime}`,
+      to: destinatarios,
+      subject: ehSerie
+        ? `Reserva confirmada: ${displayTitle} - ${datas.length} dias a partir de ${dataFmt}`
+        : `Reserva confirmada: ${displayTitle} - ${dataFmt} às ${bookingData.startTime}`,
       html: `
         <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
           <h2 style="color: #2563eb;">Reserva confirmada</h2>
-          <p>Sua reserva foi criada com sucesso. Os convidados foram notificados pela Google Agenda e o evento já aparece na agenda deles.</p>
+          <p>Sua reserva foi criada com sucesso. Os convidados foram notificados pela Google Agenda e o evento já aparece na agenda deles${ehSerie ? ' — um convite para cada dia' : ''}.</p>
           <p><strong>Título:</strong> ${displayTitle}</p>
           <p><strong>Sala:</strong> ${bookingData.roomName}</p>
-          <p><strong>Data:</strong> ${dataFmt}</p>
-          <p><strong>Horário:</strong> ${bookingData.startTime} - ${bookingData.endTime}</p>
+          ${blocoResponsavel}
+          ${blocoDatas}
+          <p><strong>Horário:</strong> ${bookingData.startTime} - ${bookingData.endTime}${ehSerie ? ' (em todos os dias)' : ''}</p>
           <p><strong>Convidados:</strong> ${convidados}</p>
           ${notasBloco}
           ${linkBloco}

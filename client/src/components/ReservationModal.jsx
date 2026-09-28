@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText } from 'lucide-react';
+import { X, Calendar, Clock, Mail, AlertCircle, Users, Type, Check, FileText, UsersRound, CalendarDays } from 'lucide-react';
 import api from '../api';
+import MultiDatePicker from './MultiDatePicker';
+// Lista local: usada apenas como fallback se o diretório do Workspace estiver
+// indisponível. A fonte normal é a rota /directory/users.
 import usersList from '../users.json';
 // 1. IMPORTAR O TOAST
 import toast from 'react-hot-toast';
 import TermoPdfModal from './TermoPdfModal';
+import ErrorBoundary from './ErrorBoundary';
+import { RESTRICTED_ROOM_ID } from '../config';
+import { responsavelDe } from '../bookingDisplay';
 
 const ID_SALAO = 'j7QOhdPRzEJcza2cMqwM';
 const TERMO_SALAO_PDF = '/termos/it-depsu-30-salao.pdf';
@@ -14,6 +20,9 @@ export default function ReservationModal({
 }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
   const isSalao = room.id === ID_SALAO;
+  // Sala restrita: só alguns e-mails podem reservá-la, e quem vai usar a sala
+  // é informado no campo Responsável.
+  const isRestrita = RESTRICTED_ROOM_ID !== '' && room.id === RESTRICTED_ROOM_ID;
   const [confirmedTerms, setConfirmedTerms] = useState(false);
   const [showTermoModal, setShowTermoModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -22,10 +31,17 @@ export default function ReservationModal({
     startTime: initialTime || '',
     endTime: initialTime ? (parseInt(initialTime.split(':')[0]) + 1).toString().padStart(2, '0') + ':00' : '',
     userEmail: currentUserEmail || '',
+    solicitanteEmail: '',
     attendees: '',
     notes: ''
   });
   
+  // Reserva de vários dias: `formData.date` é a primeira data e `datasExtras`
+  // guarda os outros dias, todos no mesmo horário.
+  const [multiDias, setMultiDias] = useState(false);
+  const [datasExtras, setDatasExtras] = useState([]);
+  const [conflitosServidor, setConflitosServidor] = useState([]);
+
   const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -37,6 +53,99 @@ export default function ReservationModal({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef(null);
 
+  // Autocomplete do campo Responsável (só existe na sala restrita).
+  const [sugestoesSolicitante, setSugestoesSolicitante] = useState([]);
+  const [mostrarSugestoesSolicitante, setMostrarSugestoesSolicitante] = useState(false);
+  const solicitanteRef = useRef(null);
+
+  // Diretório da organização (pessoas) e grupos de convite disponíveis.
+  const [pessoas, setPessoas] = useState([]);
+  const [grupos, setGrupos] = useState([]);
+  const [avisoDiretorio, setAvisoDiretorio] = useState(null);
+
+  // Carrega pessoas e grupos uma vez, ao abrir o modal.
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregar = async () => {
+      const [resPessoas, resGrupos] = await Promise.allSettled([
+        api.get('/directory/users'),
+        api.get('/directory/groups')
+      ]);
+
+      if (cancelado) return;
+
+      const doWorkspace = resPessoas.status === 'fulfilled'
+        ? ensureArray(resPessoas.value.data?.users)
+        : [];
+
+      if (doWorkspace.length > 0) {
+        setPessoas(doWorkspace);
+        setAvisoDiretorio(null);
+      } else {
+        // Fallback: mantém o autocomplete funcionando com a lista local.
+        setPessoas(usersList);
+        const motivo = resPessoas.status === 'fulfilled'
+          ? resPessoas.value.data?.aviso
+          : resPessoas.reason?.response?.data?.error;
+        setAvisoDiretorio(motivo || 'Diretório do Workspace indisponível — usando a lista local.');
+        console.warn('Diretório indisponível:', motivo);
+      }
+
+      if (resGrupos.status === 'fulfilled') {
+        setGrupos(ensureArray(resGrupos.value.data?.grupos));
+      }
+    };
+
+    carregar();
+    return () => { cancelado = true; };
+  }, []);
+
+  /**
+   * Traduz o conteúdo do campo "Convidados" em pessoas de verdade.
+   * Um token pode ser um e-mail, um grupo do painel (`grupo:<slug>`) ou o
+   * e-mail de um Google Group. O backend faz a mesma expansão na hora de
+   * salvar; aqui ela serve para o free/busy e para o resumo na tela.
+   */
+  const expandirConvidados = (texto) => {
+    const tokens = (texto || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    const emails = [];
+    const vistos = new Set();
+    const gruposUsados = [];
+
+    const adicionar = (valor) => {
+      const email = (valor || '').trim().toLowerCase();
+      if (!email || !email.includes('@') || vistos.has(email)) return;
+      vistos.add(email);
+      emails.push(email);
+    };
+
+    tokens.forEach((token) => {
+      const grupo = grupos.find((g) => g.token.toLowerCase() === token.toLowerCase());
+
+      if (grupo) {
+        gruposUsados.push(grupo);
+        if (ensureArray(grupo.membros).length > 0) {
+          grupo.membros.forEach(adicionar);
+        } else if (grupo.tipo === 'google') {
+          // Sem membros legíveis: o próprio Google distribui aos integrantes.
+          adicionar(grupo.token);
+        }
+        return;
+      }
+
+      if (token.includes('@')) adicionar(token);
+    });
+
+    return { emails, gruposUsados };
+  };
+
+  const convidadosResolvidos = expandirConvidados(formData.attendees);
+
   useEffect(() => {
     if (editingBooking) {
       setFormData({
@@ -45,6 +154,7 @@ export default function ReservationModal({
         startTime: editingBooking.startTime,
         endTime: editingBooking.endTime,
         userEmail: editingBooking.userEmail,
+        solicitanteEmail: editingBooking.solicitanteEmail || '',
         attendees: editingBooking.attendees || '',
         notes: editingBooking.notes || ''
       });
@@ -58,13 +168,9 @@ export default function ReservationModal({
   // Checa a disponibilidade dos convidados no Google Agenda (free/busy).
   // Roda com um pequeno atraso (debounce) sempre que mudam convidados/horário.
   useEffect(() => {
-    const parseEmails = (texto) =>
-      (texto || '')
-        .split(',')
-        .map((e) => e.trim())
-        .filter((e) => e !== '' && e.includes('@'));
-
-    const emails = parseEmails(formData.attendees);
+    // Grupos são abertos em pessoas antes da consulta: o free/busy é por
+    // agenda individual, então um token de grupo não significa nada aqui.
+    const { emails } = expandirConvidados(formData.attendees);
 
     if (emails.length === 0 || !formData.date || !formData.startTime || !formData.endTime) {
       setBusyAttendees([]);
@@ -91,12 +197,15 @@ export default function ReservationModal({
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [formData.attendees, formData.date, formData.startTime, formData.endTime, formData.userEmail]);
+  }, [formData.attendees, formData.date, formData.startTime, formData.endTime, formData.userEmail, grupos]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(event.target)) {
         setShowSuggestions(false);
+      }
+      if (solicitanteRef.current && !solicitanteRef.current.contains(event.target)) {
+        setMostrarSugestoesSolicitante(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -133,24 +242,72 @@ export default function ReservationModal({
     const currentSearchTerm = parts[parts.length - 1].trim().toLowerCase();
 
     if (currentSearchTerm.length > 1) {
-      const matches = usersList.filter(user => 
-        user.email.toLowerCase().includes(currentSearchTerm) || 
-        user.nome.toLowerCase().includes(currentSearchTerm)
-      ).slice(0, 5); 
+      // O que já está no campo não deve reaparecer nas sugestões.
+      const jaNoCampo = new Set(
+        parts.slice(0, -1).map((t) => t.trim().toLowerCase()).filter(Boolean)
+      );
 
-      setSuggestions(matches);
+      // Grupos vêm primeiro: convidam mais gente com um clique.
+      const gruposMatch = grupos
+        .filter((g) => !jaNoCampo.has(g.token.toLowerCase()))
+        .filter((g) =>
+          g.nome.toLowerCase().includes(currentSearchTerm) ||
+          g.token.toLowerCase().includes(currentSearchTerm)
+        )
+        .slice(0, 4)
+        .map((g) => ({ kind: 'grupo', ...g }));
+
+      const pessoasMatch = pessoas
+        .filter((u) => !jaNoCampo.has(u.email.toLowerCase()))
+        .filter((u) =>
+          u.email.toLowerCase().includes(currentSearchTerm) ||
+          u.nome.toLowerCase().includes(currentSearchTerm)
+        )
+        .slice(0, 6)
+        .map((u) => ({ kind: 'pessoa', ...u }));
+
+      setSuggestions([...gruposMatch, ...pessoasMatch]);
       setShowSuggestions(true);
     } else {
       setShowSuggestions(false);
     }
   };
 
-  const selectSuggestion = (user) => {
+  const handleSolicitanteChange = (e) => {
+    const valor = e.target.value;
+    setFormData({ ...formData, solicitanteEmail: valor });
+
+    const busca = valor.trim().toLowerCase();
+    if (busca.length < 2) {
+      setMostrarSugestoesSolicitante(false);
+      return;
+    }
+
+    setSugestoesSolicitante(
+      pessoas
+        .filter((p) =>
+          p.nome.toLowerCase().includes(busca) || p.email.toLowerCase().includes(busca)
+        )
+        .slice(0, 5)
+    );
+    setMostrarSugestoesSolicitante(true);
+  };
+
+  const selecionarSolicitante = (pessoa) => {
+    setFormData({ ...formData, solicitanteEmail: pessoa.email });
+    setMostrarSugestoesSolicitante(false);
+  };
+
+  const selectSuggestion = (item) => {
+    // Grupos entram como token (`grupo:<slug>` ou o e-mail do Google Group);
+    // a expansão em pessoas acontece no backend, ao salvar.
+    const valor = item.kind === 'grupo' ? item.token : item.email;
+
     const parts = formData.attendees.split(',');
-    parts.pop(); 
-    parts.push(user.email); 
-    const newValue = parts.join(', ').replace(/^, /, ''); 
-    setFormData({ ...formData, attendees: newValue + ', ' }); 
+    parts.pop();
+    parts.push(valor);
+    const newValue = parts.join(', ').replace(/^, /, '');
+    setFormData({ ...formData, attendees: newValue + ', ' });
     setShowSuggestions(false);
     document.getElementById('attendees-input').focus();
   };
@@ -163,25 +320,86 @@ export default function ReservationModal({
       return;
     }
 
+    if (isRestrita) {
+      const solicitante = formData.solicitanteEmail.trim();
+      if (solicitante.length === 0) {
+        toast.error('Informe quem solicitou a sala no campo Responsável.');
+        return;
+      }
+      if (!solicitante.includes('@')) {
+        toast.error('O responsável precisa ser um e-mail. Selecione uma pessoa da lista.');
+        return;
+      }
+    }
+
     setLoading(true);
+    setConflitosServidor([]);
+
+    // Dias extras vão apenas na criação; editar age sobre um dia só.
+    const diasExtras = (!editingBooking && multiDias) ? datasExtras : [];
 
     // 2. LOGICA NOVA COM TOAST PROMISE
     // O toast.promise "abraça" a requisição
     const promise = editingBooking
       ? api.put(`/bookings/${editingBooking.id}`, { roomId: room.id, ...formData })
-      : api.post('/bookings', { roomId: room.id, roomName: room.nome, termConfirmed: isSalao ? confirmedTerms : false, ...formData });
+      : api.post('/bookings', {
+          roomId: room.id,
+          roomName: room.nome,
+          termConfirmed: isSalao ? confirmedTerms : false,
+          ...formData,
+          dates: diasExtras
+        });
 
     toast.promise(
        promise,
        {
-         loading: 'Processando reserva...',
-         success: () => {
+         loading: diasExtras.length > 0
+           ? `Reservando ${diasExtras.length + 1} dias e enviando os convites...`
+           : 'Processando reserva...',
+         success: (res) => {
              onSuccess();
              onClose();
-             return editingBooking ? 'Reserva atualizada!' : 'Reserva criada com sucesso!';
+
+             const total = res?.data?.totalConvidados || 0;
+             const totalDias = res?.data?.totalDias || 1;
+             const naoResolvidos = ensureArray(res?.data?.naoResolvidos);
+             const conviteNaoEnviado = ensureArray(res?.data?.conviteNaoEnviado);
+
+             // Um token que o backend não reconheceu (grupo renomeado/excluído)
+             // não pode passar em silêncio — ninguém daquele grupo foi convidado.
+             if (naoResolvidos.length > 0) {
+               toast.error(`Não foi possível identificar: ${naoResolvidos.join(', ')}`, { duration: 6000 });
+             }
+
+             // A sala ficou reservada, mas o convite daquele dia não saiu.
+             if (conviteNaoEnviado.length > 0) {
+               toast.error(
+                 `A sala foi reservada, mas o convite não foi enviado em: ` +
+                 conviteNaoEnviado.map((d) => d.split('-').reverse().join('/')).join(', '),
+                 { duration: 8000 }
+               );
+             }
+
+             if (editingBooking) {
+               return total > 0
+                 ? `Reserva atualizada! ${total} convidado(s) notificado(s).`
+                 : 'Reserva atualizada!';
+             }
+
+             const base = totalDias > 1
+               ? `Sala reservada em ${totalDias} dias!`
+               : 'Reserva criada com sucesso!';
+
+             return total > 0 ? `${base} ${total} convidado(s) notificado(s).` : base;
          },
          error: (err) => {
-             // Pega a mensagem de erro do servidor
+             // Dias ocupados voltam marcados para o usuário ajustar a seleção
+             // em vez de ter que descobrir sozinho qual dia deu problema.
+             const conflitos = ensureArray(err.response?.data?.conflitos);
+             const invalidas = ensureArray(err.response?.data?.datasInvalidas);
+             if (conflitos.length > 0 || invalidas.length > 0) {
+               setConflitosServidor([...conflitos, ...invalidas]);
+             }
              return err.response?.data?.error || "Ocorreu um erro ao salvar.";
          },
        }
@@ -259,14 +477,106 @@ export default function ReservationModal({
               </div>
             </div>
 
-            {/* RESPONSÁVEL */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Responsável</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-4 py-2.5 border border-gray-300 bg-gray-50 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
+            {/* MAIS DE UM DIA — indisponível ao editar, porque a edição age
+                sobre um único dia da série. */}
+            {editingBooking ? (
+              editingBooking.serieId && (
+                <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-3 text-xs">
+                  <CalendarDays size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    Esta reserva faz parte de um conjunto de vários dias. As alterações
+                    aqui valem <strong>somente para {formData.date.split('-').reverse().join('/')}</strong>.
+                  </span>
+                </div>
+              )
+            ) : (
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={multiDias}
+                    onChange={(e) => {
+                      setMultiDias(e.target.checked);
+                      if (!e.target.checked) setDatasExtras([]);
+                    }}
+                    className="w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand/30"
+                  />
+                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+                    <CalendarDays size={16} className="text-brand" />
+                    Usar a sala em mais de um dia, no mesmo horário
+                  </span>
+                </label>
+
+                {multiDias && (
+                  <div className="mt-3">
+                    <MultiDatePicker
+                      roomId={room.id}
+                      primaryDate={formData.date}
+                      startTime={formData.startTime}
+                      endTime={formData.endTime}
+                      selectedDates={datasExtras}
+                      onChange={(datas) => {
+                        setDatasExtras(datas);
+                        setConflitosServidor([]);
+                      }}
+                      conflitosDoServidor={conflitosServidor}
+                    />
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+
+            {/* RESPONSÁVEL — na sala restrita, quem reserva não é quem usa a
+                sala, então o responsável é digitado. Nas outras salas o campo
+                continua travado no usuário logado. */}
+            {isRestrita ? (
+              <div className="relative" ref={solicitanteRef}>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  Responsável — quem solicitou a sala
+                </label>
+                <div className="relative group">
+                  <Mail className="absolute left-3 top-3 text-gray-400 group-focus-within:text-brand transition-colors" size={18} />
+                  <input
+                    type="text"
+                    id="solicitante-input"
+                    name="solicitanteEmail"
+                    value={formData.solicitanteEmail}
+                    placeholder="Nome ou e-mail de quem pediu a reserva"
+                    autoComplete="off"
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all"
+                    onChange={handleSolicitanteChange}
+                  />
+                </div>
+
+                {mostrarSugestoesSolicitante && sugestoesSolicitante.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                    {sugestoesSolicitante.map((pessoa) => (
+                      <div
+                        key={pessoa.email}
+                        onClick={() => selecionarSolicitante(pessoa)}
+                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0"
+                      >
+                        <div className="font-bold text-gray-700 text-sm">{pessoa.nome}</div>
+                        <div className="text-xs text-gray-500">{pessoa.email}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Reserva feita por <strong>{formData.userEmail}</strong>. O responsável informado
+                  aparece nas telas da sala e recebe a confirmação por e-mail.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Responsável</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
+                  <input type="email" name="userEmail" value={formData.userEmail} readOnly className="w-full pl-10 pr-4 py-2.5 border border-gray-300 bg-gray-50 text-gray-500 rounded-lg cursor-not-allowed outline-none" />
+                </div>
+              </div>
+            )}
 
             {/* CONVIDADOS */}
             <div className="relative" ref={suggestionsRef}>
@@ -277,29 +587,72 @@ export default function ReservationModal({
                   id="attendees-input"
                   name="attendees" 
                   value={formData.attendees} 
-                  placeholder="Comece a digitar o nome ou email..." 
-                  rows="2" 
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all" 
-                  onChange={handleAttendeesChange} 
+                  placeholder="Digite um nome, e-mail ou grupo..."
+                  rows="2"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none text-sm transition-all"
+                  onChange={handleAttendeesChange}
                 />
               </div>
-              
+
               {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                  {suggestions.map((user, index) => (
-                    <div 
-                      key={index}
-                      onClick={() => selectSuggestion(user)}
-                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 flex justify-between items-center group"
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-56 overflow-y-auto">
+                  {suggestions.map((item) => (
+                    <div
+                      key={`${item.kind}-${item.kind === 'grupo' ? item.token : item.email}`}
+                      onClick={() => selectSuggestion(item)}
+                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 flex justify-between items-center gap-3 group"
                     >
-                      <div>
-                        <div className="font-bold text-gray-700 text-sm">{user.nome}</div>
-                        <div className="text-xs text-gray-500">{user.email}</div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-gray-700 text-sm flex items-center gap-1.5">
+                          {item.kind === 'grupo' && <UsersRound size={14} className="text-brand shrink-0" />}
+                          <span className="truncate">{item.nome}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {item.kind === 'grupo'
+                            ? `${item.membros?.length || 0} pessoa(s)${item.tipo === 'google' ? ` · ${item.token}` : ''}`
+                            : item.email}
+                        </div>
                       </div>
-                      <Check size={16} className="text-brand opacity-0 group-hover:opacity-100" />
+                      <div className="flex items-center gap-2 shrink-0">
+                        {item.kind === 'grupo' && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                            item.tipo === 'google'
+                              ? 'bg-blue-50 text-blue-600'
+                              : 'bg-purple-50 text-purple-600'
+                          }`}>
+                            {item.tipo === 'google' ? 'Google Group' : 'Grupo'}
+                          </span>
+                        )}
+                        <Check size={16} className="text-brand opacity-0 group-hover:opacity-100" />
+                      </div>
                     </div>
                   ))}
                 </div>
+              )}
+
+              {/* RESUMO: quantas pessoas serão convidadas de fato */}
+              {(convidadosResolvidos.gruposUsados.length > 0 || convidadosResolvidos.emails.length > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {convidadosResolvidos.gruposUsados.map((g) => (
+                    <span
+                      key={g.token}
+                      title={ensureArray(g.membros).join(', ')}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200"
+                    >
+                      <UsersRound size={11} />
+                      {g.nome} ({ensureArray(g.membros).length})
+                    </span>
+                  ))}
+                  <span className="text-xs text-gray-500">
+                    {convidadosResolvidos.emails.length} pessoa(s) serão convidadas
+                  </span>
+                </div>
+              )}
+
+              {avisoDiretorio && (
+                <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  {avisoDiretorio}
+                </p>
               )}
             </div>
 
@@ -344,9 +697,15 @@ export default function ReservationModal({
             )}
 
             {/* TERMO DE USO DO SALÃO — apenas para o Salão */}
+            {/* As duas versões da caixa têm `key` diferente de propósito: assim o
+                React descarta a caixa inteira e monta a outra, em vez de trocar
+                os filhos um a um dentro do botão. Quando algo externo mexe no
+                DOM (extensão ou tradutor de página, que substitui os nós de
+                texto), a troca cirúrgica falha com "removeChild: node is not a
+                child of this node" e derrubava a tela toda. */}
             {isSalao && (
               confirmedTerms ? (
-                <div className="rounded-xl border p-4 bg-green-50 border-green-300">
+                <div key="termo-confirmado" className="rounded-xl border p-4 bg-green-50 border-green-300">
                   <div className="flex items-start gap-2.5">
                     <Check size={18} className="text-green-600 mt-0.5 shrink-0" />
                     <p className="text-sm font-semibold text-gray-800">
@@ -362,7 +721,7 @@ export default function ReservationModal({
                   </button>
                 </div>
               ) : (
-                <div className="rounded-xl border p-4 bg-amber-50 border-amber-300">
+                <div key="termo-pendente" className="rounded-xl border p-4 bg-amber-50 border-amber-300">
                   <p className="text-xs text-gray-700 leading-relaxed mb-3">
                     Para reservar o salão de eventos é necessário ler a Instrução de Trabalho de uso do salão e confirmar a ciência ao final do documento.
                   </p>
@@ -432,7 +791,7 @@ export default function ReservationModal({
                     {slot.title || 'Sem título'}
                   </div>
                   <div className="text-[10px] text-gray-400 truncate">
-                    {slot.userEmail}
+                    {responsavelDe(slot)}
                   </div>
                 </div>
               ))
@@ -448,14 +807,23 @@ export default function ReservationModal({
 
       {/* MODAL DO TERMO DE USO (PDF) */}
       {showTermoModal && (
-        <TermoPdfModal
-          pdfUrl={TERMO_SALAO_PDF}
-          onClose={() => setShowTermoModal(false)}
-          onConfirm={() => {
-            setConfirmedTerms(true);
-            setShowTermoModal(false);
-          }}
-        />
+        // O leitor de PDF é a parte mais frágil desta tela (react-pdf/pdf.js).
+        // Isolado numa barreira, um erro dele não derruba o formulário inteiro
+        // nem apaga o que o usuário já preencheu.
+        <ErrorBoundary
+          compacto
+          titulo="Não foi possível exibir o termo de uso."
+          aoResetar={() => setShowTermoModal(false)}
+        >
+          <TermoPdfModal
+            pdfUrl={TERMO_SALAO_PDF}
+            onClose={() => setShowTermoModal(false)}
+            onConfirm={() => {
+              setConfirmedTerms(true);
+              setShowTermoModal(false);
+            }}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
