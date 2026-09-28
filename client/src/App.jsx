@@ -61,6 +61,12 @@ function App() {
       })
   }
 
+  // O hub pode abrir as salas numa aba específica (ex.: "Ver todas" as reservas).
+  const handleSelectSystem = (system, { roomView } = {}) => {
+    if (roomView) setViewMode(roomView)
+    setActiveSystem(system)
+  }
+
   const handleLogout = async () => {
     await signOut(auth);
     setActiveSystem('hub'); // Reseta o sistema ao deslogar
@@ -97,7 +103,7 @@ function App() {
 
   // --- RENDERIZAÇÃO CONDICIONAL DO HUB ---
   if (activeSystem === 'hub') {
-    return <HubSelection user={user} onSelectSystem={setActiveSystem} onLogout={handleLogout} />
+    return <HubSelection user={user} onSelectSystem={handleSelectSystem} onLogout={handleLogout} />
   }
 
   // --- RENDERIZAÇÃO DO SISTEMA DE CARROS (Em breve) ---
