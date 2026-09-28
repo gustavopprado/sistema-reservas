@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Plus, Edit, CarFront, Settings, Check, CheckCircle, X, History, Calendar, User, Gauge, MapPin, DollarSign, Receipt, Filter, PieChart, Trash2, FileText, FileSpreadsheet, Wrench as WrenchIcon, ShieldAlert, Lock } from 'lucide-react';
+import { Plus, Edit, CarFront, Settings, Check, CheckCircle, X, History, Calendar, User, Gauge, MapPin, DollarSign, Receipt, Filter, PieChart, Trash2, FileText, FileSpreadsheet, Wrench as WrenchIcon, ShieldAlert, Lock, Files } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { exportCarBookingsXlsx } from '../exportCarBookingsXlsx';
 import CarDailyView from './CarDailyView';
 import CarRegularizadaModal from './CarRegularizadaModal';
 import CarMaintenancePanel from './CarMaintenancePanel';
+import CarDocumentsAdmin from './CarDocumentsAdmin';
 
 // Cabeçalho padrão das tabelas do painel. Com border-collapse o fundo e a borda
 // precisam ficar na própria célula, senão o thead sticky fica transparente ao rolar.
 const TH_CLASS = 'px-4 py-3 font-bold text-[11px] uppercase tracking-wider whitespace-nowrap bg-gray-50 border-b border-gray-200';
 
-export default function AdminCarPanel({ currentUserEmail }) {
+export default function AdminCarPanel({ currentUserEmail, onOpenDocuments }) {
   const ensureArray = (value) => Array.isArray(value) ? value : [];
   const normalizeCategory = (value) => {
     const normalized = String(value || '')
@@ -385,6 +386,7 @@ export default function AdminCarPanel({ currentUserEmail }) {
     { id: 'lancamento', label: 'Lançar Custo',         short: 'Lançar',     Icon: DollarSign,  desc: 'Registre combustível, manutenção, multas e demais despesas.',   activeBg: 'bg-green-50',  activeText: 'text-green-700',  activeBorder: 'border-green-600',  iconBg: 'bg-green-50 text-green-700' },
     { id: 'resumo',     label: 'Resumo Financeiro',    short: 'Financeiro', Icon: PieChart,    desc: 'Custos consolidados da frota por período, centro e categoria.', activeBg: 'bg-purple-50', activeText: 'text-purple-700', activeBorder: 'border-purple-600', iconBg: 'bg-purple-50 text-purple-700' },
     { id: 'manutencao', label: 'Manutenção',           short: 'Manutenção', Icon: WrenchIcon,  desc: 'Veículos da categoria Reserva: KM e data previstas para a próxima revisão.', activeBg: 'bg-red-50',    activeText: 'text-red-600',    activeBorder: 'border-red-500',    iconBg: 'bg-red-50 text-red-600' },
+    { id: 'documentos', label: 'Documentos',           short: 'Documentos', Icon: Files,       desc: 'PDFs do Google Drive exibidos na aba Documentos para todos os usuários.', activeBg: 'bg-blue-50',   activeText: 'text-[#0c6192]',  activeBorder: 'border-[#0c6192]',  iconBg: 'bg-blue-50 text-[#0c6192]' },
   ];
 
   const activeItem = NAV_ITEMS.find(item => item.id === activeTab) || NAV_ITEMS[0];
@@ -1229,6 +1231,11 @@ export default function AdminCarPanel({ currentUserEmail }) {
           }
         </div>
       )}
+
+      {/* ========================================= */}
+      {/* ABA 8: DOCUMENTOS                         */}
+      {/* ========================================= */}
+      {activeTab === 'documentos' && <CarDocumentsAdmin onViewAsUser={onOpenDocuments} />}
 
       {/* MODAL DE HISTÓRICO DE VIAGENS E CADASTRO MANTIDOS (IGUAIS AO ANTERIOR) */}
       {isHistoryModalOpen && (

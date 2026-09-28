@@ -126,7 +126,8 @@ sistema-reservas/
                 ├── CarRegularizadaModal.jsx    # Modal para regularizar uso retroativo
                 ├── CarDailyView.jsx            # Agenda diária da frota
                 ├── CarMonthView.jsx            # Calendário mensal de um veículo
-                ├── CarManualModal.jsx          # Manual de uso dos veículos
+                ├── CarDocumentsView.jsx        # Aba Documentos: PDFs do Drive (ou o manual fixo)
+                ├── CarDocumentsAdmin.jsx       # Painel Suprimentos > Documentos
                 ├── MyCarBookings.jsx           # Viagens do usuário logado
                 ├── AdminCarPanel.jsx           # Painel de administração da frota
                 └── CarMaintenancePanel.jsx     # Sub-painel de custos e manutenção
@@ -186,7 +187,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 - **Agenda** — visão diária mostrando quais veículos estão em uso em cada horário.
 - **Devolução** — ao devolver, o usuário informa o KM de retorno e o nível do tanque. O sistema atualiza automaticamente o KM atual no cadastro do veículo.
 - **Regularizar Uso** — registra retroativamente uma saída que ocorreu sem reserva prévia. O registro já nasce com status `concluída`.
-- **Manual do Veículo** — instrução de trabalho em PDF acessível dentro da aplicação.
+- **Documentos** — PDFs do Google Drive escolhidos pelo Suprimentos, exibidos dentro da aplicação. Sem documentos cadastrados, mostra a instrução de trabalho fixa (IT DEPSU 017).
 
 **Painel Suprimentos** — exclusivo para administradores
 
@@ -199,6 +200,7 @@ Tela inicial exibida após o login. Apresenta o nome e saudação do usuário, a
 | **Lançamento de Custos** | Registrar gastos (combustível, manutenção, multa, seguro, etc.) vinculados a um veículo. |
 | **Resumo Financeiro** | Visão consolidada dos custos por veículo e categoria. |
 | **Manutenção** | Histórico de serviços e manutenções preventivas/corretivas. |
+| **Documentos** | Título + link do Google Drive dos PDFs que aparecem na aba **Documentos**. Ver [Documentos do Drive](#documentos-do-drive-aba-documentos). |
 
 **Regras de negócio**
 
@@ -228,7 +230,7 @@ Os grupos de convidados podem ser criados e editados por qualquer um dos dois ad
 | Perfil | Definido por | Permissões |
 |---|---|---|
 | **Usuário comum** | Qualquer autenticado | Visualizar frota, reservar, devolver, ver suas viagens, regularizar uso |
-| **Admin (Suprimentos)** | `VITE_FLEET_ADMIN_EMAILS` | Tudo acima + Painel Suprimentos completo |
+| **Admin (Suprimentos)** | `VITE_FLEET_ADMIN_EMAILS` (frontend) + `FLEET_ADMIN_EMAILS` (API) | Tudo acima + Painel Suprimentos completo. A API só confere `FLEET_ADMIN_EMAILS` nas rotas de documentos |
 
 > **Atenção:** as rotas de diretório e grupos (`/directory/*`, `/admin/email-groups`) validam o ID Token do Firebase no backend. **Todas as outras** continuam checando o perfil apenas no frontend e aceitam qualquer chamada. Ver [Limitações conhecidas](#limitações-conhecidas).
 
@@ -322,7 +324,7 @@ npm run build
 
 ## 🔗 Integração com o Google Workspace
 
-A Service Account do projeto usa **Delegação em Todo o Domínio** (Domain-Wide Delegation) para duas coisas: criar eventos na agenda do organizador (já em uso) e **ler o diretório da organização** (pessoas e Google Groups). A segunda precisa de configuração extra no Google — sem ela o sistema continua funcionando, mas cai no fallback local do autocomplete.
+A Service Account do projeto usa **Delegação em Todo o Domínio** (Domain-Wide Delegation) para três coisas: criar eventos na agenda do organizador (já em uso), **ler o diretório da organização** (pessoas e Google Groups) e ler os PDFs da aba Documentos no Drive ([ver abaixo](#documentos-do-drive-aba-documentos)). A segunda precisa de configuração extra no Google — sem ela o sistema continua funcionando, mas cai no fallback local do autocomplete.
 
 ### Passo 1 — Ativar a Admin SDK API
 
@@ -372,6 +374,29 @@ Confirmado o Passo 4, a lista local deixa de ter função. Como ela é importada
 
 Até esse passo o arquivo permanece como rede de proteção, para o autocomplete não ficar vazio se a delegação cair.
 
+### Documentos do Drive (aba Documentos)
+
+Os PDFs ficam no Drive restritos ao domínio, em pastas de áreas diferentes. A API os lê e repassa o conteúdo para quem está logado. Há dois modos, escolhidos por `DRIVE_SUBJECT` no `api/.env`:
+
+| `DRIVE_SUBJECT` | Como a API lê | O que abre |
+|---|---|---|
+| preenchido (recomendado) | Personifica essa conta do Workspace (Delegação em Todo o Domínio) | Tudo que essa conta abriria pelo link, inclusive acesso **Qualquer pessoa na organização com o link** |
+| vazio | Como a própria Service Account | Só o que for compartilhado com o `client_email` do `api/serviceAccountKey.json` |
+
+Configuração do modo recomendado:
+
+1. **Ativar a Google Drive API** no projeto da Service Account: [Google Cloud Console](https://console.cloud.google.com) → *APIs e serviços → Biblioteca → Google Drive API → **Ativar***.
+2. **Autorizar o escopo** na Delegação em Todo o Domínio (mesmo caminho do [Passo 2](#passo-2--autorizar-os-escopos-na-delegação-em-todo-o-domínio)), no Client ID da Service Account. O campo substitui a lista inteira, então mantenha os escopos que já existem:
+
+   ```
+   https://www.googleapis.com/auth/calendar,https://www.googleapis.com/auth/admin.directory.user.readonly,https://www.googleapis.com/auth/admin.directory.group.readonly,https://www.googleapis.com/auth/drive.readonly
+   ```
+
+3. **Escolher a conta** e preencher `DRIVE_SUBJECT`. O escopo dá leitura a **todo o Drive** dessa conta, então use uma conta de sistema com poucos arquivos pessoais (não precisa ser administradora).
+4. Preencher `FLEET_ADMIN_EMAILS` com a mesma lista de `VITE_FLEET_ADMIN_EMAILS` e reiniciar a API.
+
+Links antigos com `resourcekey=` funcionam: a chave é guardada junto com o documento e enviada ao Drive. Arquivos do Google Docs/Apresentações são exportados para PDF (limite do Google: 10 MB). Se o dono bloquear download para leitores, o arquivo não abre.
+
 ### Cache
 
 A lista de pessoas e grupos fica em memória por `DIRECTORY_CACHE_TTL_MINUTES` (padrão 15). O autocomplete consulta a cada tecla digitada; sem cache isso viraria uma rajada de chamadas à API do Google. O botão **Atualizar** no painel força a releitura imediata (`POST /directory/refresh`), útil depois de admitir alguém.
@@ -390,6 +415,7 @@ A lista de pessoas e grupos fica em memória por `DIRECTORY_CACHE_TTL_MINUTES` (
 | `car_bookings` | Reservas de veículo (período, destino, status, KM, código `VEI-`) |
 | `car_costs` | Custos registrados por veículo (combustível, manutenção, multa, etc.) |
 | `email_groups` | Grupos de convidados criados no painel de admin (`nome`, `slug`, `descricao`, `membros[]`) |
+| `car_documents` | Documentos da aba Documentos (`titulo`, `link`, `fileId` e `resourceKey` do Drive, `mimeType`, `ordem`) |
 
 ---
 
@@ -486,6 +512,14 @@ Estas rotas exigem um **ID Token do Firebase** no header `Authorization: Bearer 
 | `POST` | `/car_costs` | Registra novo custo |
 | `PUT` | `/car_costs/:id` | Edita custo |
 | `DELETE` | `/car_costs/:id` | Exclui custo |
+| `GET` | `/car-documents` | Documentos da aba Documentos 🔒 |
+| `GET` | `/car-documents/:id/pdf` | Conteúdo do documento em PDF, lido do Drive 🔒 |
+| `POST` | `/car-documents` | Cadastra documento (`titulo`, `link`) 🔒 Suprimentos |
+| `PUT` | `/car-documents/ordem` | Reordena (`ids[]` na nova ordem) 🔒 Suprimentos |
+| `PUT` | `/car-documents/:id` | Edita título/link 🔒 Suprimentos |
+| `DELETE` | `/car-documents/:id` | Tira da aba Documentos (o arquivo no Drive fica) 🔒 Suprimentos |
+
+🔒 = exige ID Token do Firebase.
 
 ### Diagnóstico
 

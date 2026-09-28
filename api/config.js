@@ -65,6 +65,9 @@ const config = {
     bookingsReportAdmin: optional('ADMIN_BOOKINGS_EMAIL', '').trim().toLowerCase(),
     // Senha usada pelo Painel Suprimentos para forçar encerramento de reservas.
     finalizePassword: required('ADMIN_FINALIZE_PASSWORD'),
+    // Equipe de Suprimentos: gerencia os documentos exibidos na aba Documentos.
+    // Deve ser a mesma lista de VITE_FLEET_ADMIN_EMAILS no client/.env.
+    fleetAdmins: list('FLEET_ADMIN_EMAILS'),
   },
 
   restrictedRoom: {
@@ -86,6 +89,15 @@ const config = {
 
     // Contas de serviço/robô que não devem aparecer no autocomplete.
     excludedEmails: list('DIRECTORY_EXCLUDED_EMAILS'),
+  },
+
+  drive: {
+    // Conta do Workspace que a Service Account personifica para ler os PDFs
+    // da aba Documentos. Com ela, qualquer arquivo com acesso "Qualquer pessoa
+    // na organização com o link" abre, sem compartilhar nada com o sistema.
+    // Exige o escopo drive.readonly na Delegação em Todo o Domínio.
+    // Vazio = a Service Account lê sozinha, só o que for compartilhado com ela.
+    subject: optional('DRIVE_SUBJECT', '').toLowerCase(),
   },
 
   auth: {

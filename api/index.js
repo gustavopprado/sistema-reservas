@@ -27,6 +27,7 @@ const {
 } = require('./calendarService');
 const directory = require('./directoryService');
 const emailGroups = require('./emailGroups');
+const driveDocuments = require('./driveDocuments');
 
 // --- CONSTANTES DE ADMINISTRAÇÃO ---
 const ADMIN_EMAIL = config.admin.roomsAdmin;
@@ -149,6 +150,14 @@ function requireAdmin(req, res, next) {
 
   if (!admins.includes(req.authUser.email)) {
     return res.status(403).json({ error: 'Acesso restrito à administração.' });
+  }
+  next();
+}
+
+/** Exige que o usuário autenticado seja da equipe de Suprimentos. */
+function requireFleetAdmin(req, res, next) {
+  if (!config.admin.fleetAdmins.includes(req.authUser.email)) {
+    return res.status(403).json({ error: 'Acesso restrito ao Suprimentos.' });
   }
   next();
 }
@@ -1604,6 +1613,202 @@ app.delete('/car_costs/:id', async (req, res) => {
   } catch (error) {
     console.error('Erro ao excluir custo:', error);
     res.status(500).json({ error: 'Erro ao excluir o custo.' });
+  }
+});
+
+// ==========================================
+//     DOCUMENTOS DA FROTA (ABA DOCUMENTOS)
+// ==========================================
+// O Suprimentos cadastra links de PDFs do Google Drive (restritos ao
+// domínio); a API lê os arquivos com a Service Account e repassa o conteúdo
+// para quem está logado. Ver api/driveDocuments.js.
+
+const CAR_DOCUMENTS = 'car_documents';
+const MAX_TITULO_DOCUMENTO = 120;
+
+/**
+ * Formato devolvido ao frontend. O link vai junto para o botão "Abrir no
+ * Drive", que só funciona para quem é do domínio.
+ */
+function serializarDocumento(doc) {
+  const data = doc.data();
+  return {
+    id: doc.id,
+    titulo: data.titulo,
+    link: data.link,
+    nomeArquivo: data.nomeArquivo || '',
+    ordem: data.ordem ?? 0,
+    atualizadoEm: data.updatedAt || data.createdAt || null,
+  };
+}
+
+/**
+ * Valida título + link e confere no Drive se o arquivo existe, é legível pela
+ * Service Account e pode ser exibido como PDF. Retorna os campos a gravar
+ * ou { erro, status }.
+ */
+async function validarDocumento({ titulo, link }) {
+  const tituloLimpo = String(titulo || '').trim();
+  if (!tituloLimpo) return { erro: 'Informe um título para o documento.', status: 400 };
+  if (tituloLimpo.length > MAX_TITULO_DOCUMENTO) {
+    return { erro: `O título pode ter no máximo ${MAX_TITULO_DOCUMENTO} caracteres.`, status: 400 };
+  }
+
+  if (String(link || '').includes('/folders/')) {
+    return { erro: 'Esse é o link de uma pasta. Abra o PDF no Drive e copie o link do próprio arquivo.', status: 400 };
+  }
+
+  const fileId = driveDocuments.extractFileId(link);
+  if (!fileId) {
+    return { erro: 'Link do Google Drive não reconhecido. Use o link do botão "Copiar link" do arquivo.', status: 400 };
+  }
+
+  const resourceKey = driveDocuments.extractResourceKey(link);
+
+  let meta;
+  try {
+    meta = await driveDocuments.getFileMeta(fileId, resourceKey);
+  } catch (error) {
+    console.error('Erro ao consultar arquivo no Drive:', error.message);
+    return { erro: driveDocuments.explainError(error), status: 422 };
+  }
+
+  if (!driveDocuments.isSupportedMime(meta.mimeType)) {
+    return { erro: `"${meta.name}" não é um PDF nem um arquivo do Google Docs/Apresentações.`, status: 422 };
+  }
+
+  return {
+    campos: {
+      titulo: tituloLimpo,
+      link: String(link).trim(),
+      fileId,
+      resourceKey,
+      mimeType: meta.mimeType,
+      nomeArquivo: meta.name,
+    },
+  };
+}
+
+// ROTA: Listar documentos (qualquer usuário logado)
+app.get('/car-documents', requireAuth, async (req, res) => {
+  try {
+    const snapshot = await db.collection(CAR_DOCUMENTS).orderBy('ordem').get();
+    res.json({
+      documentos: snapshot.docs.map(serializarDocumento),
+      // Só o Suprimentos precisa saber como liberar o acesso aos arquivos.
+      leitura: config.admin.fleetAdmins.includes(req.authUser.email)
+        ? driveDocuments.leitura
+        : undefined,
+    });
+  } catch (error) {
+    console.error('Erro ao listar documentos:', error);
+    res.status(500).json({ error: 'Erro ao buscar os documentos.' });
+  }
+});
+
+// ROTA: Conteúdo do documento em PDF (qualquer usuário logado)
+app.get('/car-documents/:id/pdf', requireAuth, async (req, res) => {
+  try {
+    const doc = await db.collection(CAR_DOCUMENTS).doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Documento não encontrado.' });
+
+    const { fileId, mimeType, resourceKey, titulo } = doc.data();
+    const stream = await driveDocuments.openPdfStream(fileId, mimeType, resourceKey);
+
+    const nome = `${titulo}.pdf`.replace(/["\\\r\n]/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    stream.on('error', (error) => {
+      console.error('Erro ao transmitir PDF do Drive:', error.message);
+      res.destroy(error);
+    });
+    stream.pipe(res);
+  } catch (error) {
+    console.error('Erro ao abrir documento do Drive:', error.message);
+    res.status(502).json({ error: driveDocuments.explainError(error) });
+  }
+});
+
+// ROTA: Cadastrar documento (Suprimentos)
+app.post('/car-documents', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const resultado = await validarDocumento(req.body || {});
+    if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+
+    // Novo documento entra no fim da lista.
+    const ultimo = await db.collection(CAR_DOCUMENTS).orderBy('ordem', 'desc').limit(1).get();
+    const ordem = ultimo.empty ? 0 : (ultimo.docs[0].data().ordem ?? 0) + 1;
+
+    const agora = new Date().toISOString();
+    const ref = await db.collection(CAR_DOCUMENTS).add({
+      ...resultado.campos,
+      ordem,
+      createdAt: agora,
+      createdBy: req.authUser.email,
+      updatedAt: agora,
+      updatedBy: req.authUser.email,
+    });
+
+    res.status(201).json({ documento: serializarDocumento(await ref.get()) });
+  } catch (error) {
+    console.error('Erro ao cadastrar documento:', error);
+    res.status(500).json({ error: 'Erro ao cadastrar o documento.' });
+  }
+});
+
+// ROTA: Reordenar documentos (Suprimentos). Recebe { ids: [...] } na nova ordem.
+// Declarada antes de /:id para "ordem" não ser lido como um ID.
+app.put('/car-documents/ordem', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
+    const snapshot = await db.collection(CAR_DOCUMENTS).get();
+    const existentes = new Set(snapshot.docs.map((d) => d.id));
+
+    if (ids.length !== existentes.size || !ids.every((id) => existentes.has(id))) {
+      return res.status(409).json({ error: 'A lista mudou enquanto você reordenava. Recarregue a tela.' });
+    }
+
+    const batch = db.batch();
+    ids.forEach((id, ordem) => batch.update(db.collection(CAR_DOCUMENTS).doc(id), { ordem }));
+    await batch.commit();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao reordenar documentos:', error);
+    res.status(500).json({ error: 'Erro ao salvar a nova ordem.' });
+  }
+});
+
+// ROTA: Editar documento (Suprimentos)
+app.put('/car-documents/:id', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    const ref = db.collection(CAR_DOCUMENTS).doc(req.params.id);
+    if (!(await ref.get()).exists) return res.status(404).json({ error: 'Documento não encontrado.' });
+
+    const resultado = await validarDocumento(req.body || {});
+    if (resultado.erro) return res.status(resultado.status).json({ error: resultado.erro });
+
+    await ref.update({
+      ...resultado.campos,
+      updatedAt: new Date().toISOString(),
+      updatedBy: req.authUser.email,
+    });
+    res.json({ documento: serializarDocumento(await ref.get()) });
+  } catch (error) {
+    console.error('Erro ao editar documento:', error);
+    res.status(500).json({ error: 'Erro ao salvar o documento.' });
+  }
+});
+
+// ROTA: Remover documento (Suprimentos). Só tira da aba; o arquivo no Drive fica intacto.
+app.delete('/car-documents/:id', requireAuth, requireFleetAdmin, async (req, res) => {
+  try {
+    await db.collection(CAR_DOCUMENTS).doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao remover documento:', error);
+    res.status(500).json({ error: 'Erro ao remover o documento.' });
   }
 });
 
