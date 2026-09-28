@@ -30,11 +30,28 @@ function getAuthClient(subject) {
 
 function buildEventResource(bookingData) {
   const displayTitle = bookingData.title || 'Reunião Reservada';
-  const attendees = Array.isArray(bookingData.attendeesList)
-    ? bookingData.attendeesList
-        .filter((email) => email && email !== bookingData.userEmail)
-        .map((email) => ({ email }))
-    : [];
+  const organizador = (bookingData.userEmail || '').trim().toLowerCase();
+  const solicitante = (bookingData.solicitanteEmail || '').trim().toLowerCase();
+
+  // Na sala restrita, quem reserva não é quem vai usar a sala. O responsável
+  // precisa entrar como convidado do evento — é isso que faz o Google mandar
+  // o convite e colocar a reserva na agenda dele. Citá-lo apenas na descrição
+  // não agenda nada para ninguém.
+  //
+  // Ele vem primeiro na lista porque é o dono de fato da reserva.
+  const vistos = new Set();
+  const attendees = [
+    ...(solicitante ? [solicitante] : []),
+    ...(Array.isArray(bookingData.attendeesList) ? bookingData.attendeesList : [])
+  ]
+    .map((email) => (email || '').trim().toLowerCase())
+    .filter((email) => {
+      // O organizador já é dono do evento, e e-mail repetido duplica convite.
+      if (email.length === 0 || email === organizador || vistos.has(email)) return false;
+      vistos.add(email);
+      return true;
+    })
+    .map((email) => ({ email }));
 
   const pauta = (bookingData.notes && bookingData.notes.trim().length > 0)
     ? `\n\nPauta / Anotações:\n${bookingData.notes}`
